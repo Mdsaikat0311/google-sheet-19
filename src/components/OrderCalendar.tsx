@@ -144,6 +144,112 @@ export const OrderCalendar: React.FC<OrderCalendarProps> = ({
   // Currently selected date details
   const selectedDetails = selectedDayKey ? dateOrderMap.get(selectedDayKey) : null;
 
+  // Month-wise min and max order statistics for dynamic color grading & peak order display
+  const monthStats = useMemo(() => {
+    let minCount = Infinity;
+    let maxCount = 0;
+    let hasOrders = false;
+    let peakDays: number[] = [];
+
+    for (let day = 1; day <= daysInMonth; day++) {
+      const dayStr = String(day).padStart(2, '0');
+      const monthStr = String(month + 1).padStart(2, '0');
+      const key = `${year}-${monthStr}-${dayStr}`;
+      const dayData = dateOrderMap.get(key);
+      const count = dayData?.count || 0;
+      if (count > 0) {
+        hasOrders = true;
+        if (count < minCount) minCount = count;
+        if (count > maxCount) {
+          maxCount = count;
+          peakDays = [day];
+        } else if (count === maxCount) {
+          peakDays.push(day);
+        }
+      }
+    }
+
+    return {
+      minCount: hasOrders ? minCount : 0,
+      maxCount: hasOrders ? maxCount : 0,
+      hasOrders,
+      peakDays,
+    };
+  }, [dateOrderMap, daysInMonth, month, year]);
+
+  // Color grading helper: red (lowest sell) -> coral -> orange -> amber -> lime -> green -> deep green (highest sell)
+  const getMonthColorGrade = (count: number) => {
+    if (count <= 0) {
+      return {
+        badgeClass: 'text-gray-600',
+        cellClass: 'bg-[#0d1017]/70 border-[#1a1f2e]/60',
+        label: 'কোনো অর্ডার নেই',
+      };
+    }
+
+    if (!monthStats.hasOrders || monthStats.maxCount <= monthStats.minCount) {
+      return {
+        badgeClass: 'bg-emerald-600/25 text-emerald-200 border border-emerald-500/50 shadow-xs',
+        cellClass: 'bg-[#101a15] hover:bg-[#14221b] border-emerald-500/30 hover:border-emerald-500/50',
+        label: 'অর্ডার যুক্ত দিন',
+      };
+    }
+
+    // Relative ratio from 0.0 (lowest in month) to 1.0 (highest in month)
+    const ratio = (count - monthStats.minCount) / (monthStats.maxCount - monthStats.minCount);
+
+    if (ratio <= 0.05) {
+      // 0: সর্বনিম্ন সেল (Red)
+      return {
+        badgeClass: 'bg-red-500/25 text-red-200 border border-red-500/50 shadow-xs shadow-red-950/40',
+        cellClass: 'bg-[#1a1013] hover:bg-[#201418] border-red-500/35 hover:border-red-400',
+        label: 'সর্বনিম্ন সেল (লাল)',
+      };
+    } else if (ratio <= 0.22) {
+      // 1: লো-সেল (Rose / Red-Orange)
+      return {
+        badgeClass: 'bg-rose-500/25 text-rose-200 border border-rose-500/45',
+        cellClass: 'bg-[#1a1218] hover:bg-[#20161f] border-rose-500/30 hover:border-rose-400',
+        label: 'কম সেল',
+      };
+    } else if (ratio <= 0.42) {
+      // 2: মিডল-লো সেল (Orange)
+      return {
+        badgeClass: 'bg-orange-500/25 text-orange-200 border border-orange-500/45',
+        cellClass: 'bg-[#1b1510] hover:bg-[#211a14] border-orange-500/30 hover:border-orange-400',
+        label: 'মাঝারি কম সেল',
+      };
+    } else if (ratio <= 0.62) {
+      // 3: মিডল সেল (Amber / Yellow)
+      return {
+        badgeClass: 'bg-amber-500/25 text-amber-200 border border-amber-500/45',
+        cellClass: 'bg-[#191710] hover:bg-[#201d14] border-amber-500/30 hover:border-amber-400',
+        label: 'মাঝারি সেল',
+      };
+    } else if (ratio <= 0.82) {
+      // 4: মিডল-হাই সেল (Lime / Light Green)
+      return {
+        badgeClass: 'bg-lime-500/25 text-lime-200 border border-lime-500/50',
+        cellClass: 'bg-[#131a12] hover:bg-[#182117] border-lime-500/30 hover:border-lime-400',
+        label: 'ভালো সেল',
+      };
+    } else if (ratio < 0.98) {
+      // 5: হাই সেল (Emerald)
+      return {
+        badgeClass: 'bg-emerald-500/30 text-emerald-200 border border-emerald-500/50 shadow-xs',
+        cellClass: 'bg-[#101b15] hover:bg-[#14231b] border-emerald-500/35 hover:border-emerald-400',
+        label: 'অনেক ভালো সেল',
+      };
+    } else {
+      // 6: সর্বোচ্চ সেল (Deep Green / গাঢ় সবুজ)
+      return {
+        badgeClass: 'bg-gradient-to-r from-emerald-600 to-green-600 text-white font-black border border-emerald-400/70 shadow-sm shadow-emerald-500/40',
+        cellClass: 'bg-[#0e2117] hover:bg-[#12281c] border-emerald-500/50 hover:border-emerald-300 ring-1 ring-emerald-500/30',
+        label: 'সর্বোচ্চ সেল (গাঢ় সবুজ)',
+      };
+    }
+  };
+
   return (
     <div className="w-full bg-[#12151f] border border-[#1e2436] rounded-2xl p-2.5 sm:p-5 shadow-lg space-y-3 sm:space-y-4">
       {/* Calendar Header: Optimized for Mobile Screen */}
@@ -155,11 +261,23 @@ export const OrderCalendar: React.FC<OrderCalendarProps> = ({
               <CalendarIcon className="w-4 h-4 sm:w-5 sm:h-5" />
             </div>
             <div className="min-w-0">
-              <h3 className="text-xs sm:text-base font-bold text-white tracking-tight flex items-center gap-1.5 truncate">
+              <h3 className="text-xs sm:text-base font-bold text-white tracking-tight flex items-center gap-2 flex-wrap">
                 <span>অর্ডার ক্যালেন্ডার</span>
-                <span className="text-[9px] sm:text-[10px] bg-pink-500/10 text-pink-400 border border-pink-500/20 px-1.5 py-0.2 rounded font-semibold font-mono">
-                  {totalOrdersCount} অর্ডার
-                </span>
+                {monthStats.hasOrders ? (
+                  <span
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-gradient-to-r from-emerald-600/30 via-emerald-500/20 to-teal-500/25 border border-emerald-400/60 text-emerald-200 shadow-md shadow-emerald-950/60"
+                    title={`এই মাসের সর্বোচ্চ সেল: ${monthStats.maxCount} টি অর্ডার`}
+                  >
+                    <span className="text-[10px] sm:text-xs font-semibold text-emerald-400">সর্বোচ্চ সেল:</span>
+                    <span className="text-sm sm:text-lg md:text-xl font-black text-white font-mono bg-emerald-700/60 px-2.5 py-0.5 rounded-lg border border-emerald-400/60 leading-none shadow-xs">
+                      {monthStats.maxCount} টি
+                    </span>
+                  </span>
+                ) : (
+                  <span className="text-[11px] sm:text-xs bg-[#161a27] text-gray-400 border border-[#262f47] px-2 py-0.5 rounded-lg font-medium">
+                    অর্ডার নেই
+                  </span>
+                )}
               </h3>
               <p className="text-[10px] sm:text-xs text-gray-400 hidden xs:block truncate">
                 তারিখ অনুযায়ী কবে কয়টা অর্ডার
@@ -294,6 +412,7 @@ export const OrderCalendar: React.FC<OrderCalendarProps> = ({
               const hasOrders = count > 0;
               const isToday = key === todayKey;
               const isSelected = key === selectedDayKey;
+              const grading = getMonthColorGrade(count);
 
               return (
                 <button
@@ -305,11 +424,11 @@ export const OrderCalendar: React.FC<OrderCalendarProps> = ({
                   }}
                   className={`h-12 sm:h-16 p-1 sm:p-1.5 rounded-lg sm:rounded-xl border flex flex-col justify-between transition-all cursor-pointer text-left relative overflow-hidden active:scale-95 ${
                     isSelected
-                      ? 'bg-pink-600/25 border-pink-500 shadow-md shadow-pink-600/30'
+                      ? 'bg-pink-600/25 border-pink-500 shadow-md shadow-pink-600/30 ring-2 ring-pink-500/50'
                       : isToday
                       ? 'bg-[#181d2c] border-pink-500/70 shadow-xs ring-1 ring-pink-500/40'
                       : hasOrders
-                      ? 'bg-[#151926] hover:bg-[#1a2030] border-[#252d42] hover:border-pink-500/40'
+                      ? `${grading.cellClass}`
                       : 'bg-[#0d1017]/70 border-[#1a1f2e]/60'
                   }`}
                 >
@@ -332,18 +451,12 @@ export const OrderCalendar: React.FC<OrderCalendarProps> = ({
                     )}
                   </div>
 
-                  {/* Bottom: Order Indicator / Count Badge */}
+                  {/* Bottom: Order Indicator / Count Badge with Month-wise Color Grading */}
                   <div className="w-full mt-auto">
                     {hasOrders ? (
                       <div
-                        className={`w-full text-center py-0.5 px-0.5 rounded text-[9px] sm:text-[10px] font-bold leading-tight truncate ${
-                          count >= 10
-                            ? 'bg-gradient-to-r from-pink-600 to-rose-600 text-white shadow-xs'
-                            : count >= 5
-                            ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                            : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                        }`}
-                        title={`${dayNum} তারিখে ${count} টি অর্ডার`}
+                        className={`w-full text-center py-0.5 px-0.5 rounded text-[9px] sm:text-[10px] font-bold leading-tight truncate transition-colors ${grading.badgeClass}`}
+                        title={`${dayNum} তারিখে ${count} টি অর্ডার (${grading.label})`}
                       >
                         <span className="xs:hidden">{count}</span>
                         <span className="hidden xs:inline">{count} অর্ডার</span>
@@ -372,6 +485,7 @@ export const OrderCalendar: React.FC<OrderCalendarProps> = ({
             activeDateList.map(([dateKey, dayData]) => {
               const isSelected = selectedDayKey === dateKey;
               const isToday = dateKey === todayKey;
+              const grading = getMonthColorGrade(dayData.count);
 
               return (
                 <div
@@ -407,7 +521,7 @@ export const OrderCalendar: React.FC<OrderCalendarProps> = ({
                   </div>
 
                   <div className="flex items-center gap-2 shrink-0">
-                    <span className="px-2 py-1 rounded-md text-[11px] font-bold bg-pink-600/20 text-pink-300 border border-pink-500/30 font-mono">
+                    <span className={`px-2 py-1 rounded-md text-[11px] font-bold font-mono border transition-colors ${grading.badgeClass}`}>
                       {dayData.count} টি অর্ডার
                     </span>
                   </div>

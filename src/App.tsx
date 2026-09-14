@@ -102,6 +102,22 @@ export default function App() {
     return orders.filter((o) => checkSteadfastEligibility(o).isEligible).length;
   }, [orders]);
 
+  // Processing and Hold orders counts across all products (for Orders tab badges)
+  const { allProductsProcessingCount, allProductsHoldCount, processingAndHoldTotal } = React.useMemo(() => {
+    let proc = 0;
+    let hold = 0;
+    orders.forEach((o) => {
+      const s = (o.status || '').toLowerCase();
+      if (s.includes('proc') || s.includes('প্রসেসিং')) proc++;
+      else if (s.includes('hold') || s.includes('হোল্ড')) hold++;
+    });
+    return {
+      allProductsProcessingCount: proc,
+      allProductsHoldCount: hold,
+      processingAndHoldTotal: proc + hold,
+    };
+  }, [orders]);
+
   const [products, setProducts] = useState<Product[]>(() => {
     const saved = localStorage.getItem('app_products');
     if (saved) {
@@ -1186,6 +1202,8 @@ export default function App() {
         onOpenSettings={() => setIsSheetSettingsOpen(true)}
         onLogout={handleLogout}
         ordersCount={orders.length}
+        ordersProcessingCount={allProductsProcessingCount}
+        ordersHoldCount={allProductsHoldCount}
         steadfastCount={unenteredSteadfastOrdersCount}
         mobileOpen={isMobileMenuOpen}
         onCloseMobile={() => setIsMobileMenuOpen(false)}
@@ -1353,8 +1371,11 @@ export default function App() {
         >
           <div className="relative">
             <ShoppingBag className="w-5 h-5" />
-            <span className="absolute -top-1.5 -right-3 px-1.5 py-0.2 rounded-full bg-[#8a4af3] text-white text-[9px] font-bold shadow">
-              {orders.length > 0 ? orders.length : '0'}
+            <span
+              className="absolute -top-1.5 -right-3 px-1.5 py-0.2 rounded-full bg-[#8a4af3] text-white text-[9px] font-bold shadow"
+              title={`সকল প্রোডাক্টের প্রসেসিং (${allProductsProcessingCount}) + হোল্ড (${allProductsHoldCount}) = মোট ${processingAndHoldTotal} টি`}
+            >
+              {processingAndHoldTotal}
             </span>
           </div>
           <span className="text-[10px]">Orders</span>

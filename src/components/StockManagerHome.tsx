@@ -394,25 +394,6 @@ export const StockManagerHome: React.FC<StockManagerHomeProps> = ({
 
   return (
     <div className="space-y-3">
-      {/* Section Header with Clean Title and New Stock Entry Button */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 bg-[#12151f] border border-[#1e2436] rounded-xl px-3.5 py-2.5">
-        <div className="flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-pink-500 animate-pulse" />
-          <h3 className="text-xs sm:text-sm font-bold text-white tracking-tight">
-            রিয়েলটাইম স্টক এন্ট্রি ও অনুমোদন কেন্দ্র
-          </h3>
-        </div>
-
-        {/* Action Controls */}
-        <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
-          {/* Product Entry Card Badge */}
-          <div className="flex items-center gap-1.5 bg-[#0c0e15] px-2.5 py-1.5 rounded-lg border border-[#20273a] text-xs font-semibold text-pink-400">
-            <Package className="w-3.5 h-3.5" />
-            <span>প্রোডাক্ট এন্ট্রি কার্ড ({displayCount})</span>
-          </div>
-        </div>
-      </div>
-
       {/* প্রোডাক্ট ভিত্তিক এন্ট্রি ও শিট ৩ রিয়েলটাইম কার্ড (Mobile Optimized & Fully Editable) */}
       <div className="space-y-2.5">
           {/* Search, Filter & Live Sync Status Bar */}

@@ -717,9 +717,11 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
 
         {/* Top Status Tabs with Counter Badges - Swipeable on mobile */}
         <div className="mt-2 flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none -mx-1 px-1">
-          {(['All', 'Processing', 'Completed', 'On hold', 'Cancelled', 'Pending'] as const).map((filter) => {
+          {(['All', 'Processing', 'On hold', 'Completed', 'Cancelled', 'Pending'] as const).map((filter) => {
             const isActive = activeFilter === filter;
             const count = filterCounts[filter] || 0;
+            const showCount = filter !== 'All' && filter !== 'Completed';
+
             return (
               <button
                 key={filter}
@@ -731,13 +733,15 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                 }`}
               >
                 <span>{filter}</span>
-                <span
-                  className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
-                    isActive ? 'bg-[#235863]/60 text-[#7de3e0] font-bold' : 'bg-[#252533] text-gray-400'
-                  }`}
-                >
-                  {count}
-                </span>
+                {showCount && (
+                  <span
+                    className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
+                      isActive ? 'bg-[#235863]/60 text-[#7de3e0] font-bold' : 'bg-[#252533] text-gray-400'
+                    }`}
+                  >
+                    {count}
+                  </span>
+                )}
               </button>
             );
           })}

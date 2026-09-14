@@ -20,6 +20,8 @@ interface SidebarProps {
   onOpenSettings: () => void;
   onLogout?: () => void;
   ordersCount?: number;
+  ordersProcessingCount?: number;
+  ordersHoldCount?: number;
   steadfastCount?: number;
   mobileOpen?: boolean;
   onCloseMobile?: () => void;
@@ -32,6 +34,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onOpenSettings,
   onLogout,
   ordersCount = 0,
+  ordersProcessingCount,
+  ordersHoldCount,
   steadfastCount = 0,
   mobileOpen = false,
   onCloseMobile,
@@ -48,7 +52,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: 'অর্ডার',
       sublabel: 'Orders',
       icon: ShoppingBag,
-      badge: ordersCount > 0 ? ordersCount : undefined,
+      badge: (ordersProcessingCount !== undefined && ordersHoldCount !== undefined)
+        ? (ordersProcessingCount + ordersHoldCount > 0 ? ordersProcessingCount + ordersHoldCount : undefined)
+        : ordersCount > 0 ? ordersCount : undefined,
     },
     {
       id: 'steadfast' as const,
