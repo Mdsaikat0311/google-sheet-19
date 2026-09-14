@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { Order, OrderStatus, Product, Sheet3ProductEntry } from '../types';
 import { updateOrderCardViaAppsScript, buildOrderCardPayload } from '../services/sheets';
+import { groupItemsByDate } from '../utils/dateGrouping';
 
 /**
  * Matches an order's product or variant against the selected product filter
@@ -743,8 +744,8 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
         </div>
       </div>
 
-      {/* Orders List: Well-proportioned, comfortably readable cards */}
-      <div className="space-y-2 sm:space-y-2.5">
+      {/* Orders List: Divided by Date (Today, Yesterday, Date) */}
+      <div className="space-y-3">
         {filteredOrders.length === 0 ? (
           <div className="py-12 sm:py-16 px-4 text-center bg-[#141418] rounded-xl border border-[#23242c]">
             <Package className="w-10 h-10 text-gray-600 mx-auto mb-2" />
@@ -768,104 +769,142 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
             )}
           </div>
         ) : (
-          filteredOrders.map((order, index) => {
-            const orderKey = getOrderKey(order, index);
-            const statusStyle = getStatusBadgeStyle(order.status);
-            const displayAmount = order.total || order.amount || 599;
-
-            return (
-              <div
-                key={orderKey}
-                onClick={() => onSelectOrder(order)}
-                className={`bg-[#141419] hover:bg-[#181822] active:bg-[#1c1c28] border border-[#232430] hover:border-[#383a4c] rounded-xl p-3 sm:px-4 sm:py-3 shadow-xs transition-all cursor-pointer select-none relative ${
-                  activeDropdown?.orderKey === orderKey ? 'z-30' : 'z-0'
-                }`}
-              >
-                {/* Line 1: Name & Date (Left) | Edit Pen & Order Status Change Dropdown (Right) */}
-                <div className="flex items-center justify-between gap-2">
-                  <div className="min-w-0 flex-1">
-                    {order.date && (
-                      <span className="text-[10px] text-gray-500/70 font-mono block leading-none mb-0.5 select-none">
-                        {order.date}
-                      </span>
-                    )}
-                    <span className="font-bold text-gray-100 text-sm sm:text-base truncate block">
-                      {order.customerName || 'নামবিহীন'}
-                    </span>
-                  </div>
-
-                  {/* Actions on Right: Quick Edit Pen + Order Status Change Dropdown */}
-                  <div className="flex items-center gap-1.5 sm:gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
-                    {/* Quick Edit Pen Button */}
-                    <button
-                      type="button"
-                      onClick={(e) => openEditModal(e, order)}
-                      className="p-1.5 rounded-lg bg-[#1e2230] hover:bg-[#282e42] active:scale-95 text-pink-400 hover:text-pink-300 border border-[#2b334a] transition-all flex items-center justify-center cursor-pointer"
-                      title="অর্ডার এডিট করুন"
-                    >
-                      <Edit3 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                    </button>
-
-                    {/* Order Status Change Dropdown */}
-                    <div className="relative">
-                      <button
-                        type="button"
-                        onClick={(e) => toggleDropdown(e, orderKey, 'status')}
-                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border transition-all cursor-pointer active:scale-95 ${statusStyle.badge}`}
-                        title="অর্ডার স্ট্যাটাস পরিবর্তন করুন"
-                      >
-                        <span className={`w-1.5 h-1.5 rounded-full ${statusStyle.dot}`} />
-                        <span className="truncate max-w-[85px] sm:max-w-none">{statusStyle.label}</span>
-                        <ChevronDown className="w-3 h-3 opacity-70 shrink-0" />
-                      </button>
-
-                      {/* Dropdown Menu for Status */}
-                      {activeDropdown?.orderKey === orderKey && activeDropdown?.type === 'status' && (
-                        <div
-                          onClick={(e) => e.stopPropagation()}
-                          className="absolute right-0 top-full mt-1 w-44 max-h-56 overflow-y-auto bg-[#181822] border border-[#2f2f40] rounded-xl shadow-2xl py-1 z-50 animate-fadeIn"
-                        >
-                          <div className="px-3 py-1 text-[11px] text-gray-400 font-semibold border-b border-[#252535] sticky top-0 bg-[#181822] z-10">
-                            স্ট্যাটাস পরিবর্তন করুন
-                          </div>
-                          {availableStatuses.map((st) => (
-                            <button
-                              key={st}
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onUpdateOrderStatus(order, st);
-                                setActiveDropdown(null);
-                              }}
-                              className="w-full text-left px-3 py-2 text-xs text-gray-200 hover:bg-[#252535] flex items-center justify-between cursor-pointer"
-                            >
-                              <span>{st}</span>
-                              {order.status === st && (
-                                <Check className="w-3.5 h-3.5 text-[#7de3e0]" />
-                              )}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
+          groupItemsByDate(filteredOrders, (o) => o.date || (o as any).createdAt).map((group) => (
+            <div key={group.key} className="space-y-2 sm:space-y-2.5 pt-1.5 first:pt-0">
+              {/* Date Header Divider */}
+              <div className="flex items-center gap-2 px-1 py-1">
+                <div
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-semibold ${
+                    group.isToday
+                      ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
+                      : group.isYesterday
+                      ? 'bg-amber-500/15 border-amber-500/30 text-amber-300'
+                      : 'bg-[#181a24] border-[#252838] text-gray-300'
+                  }`}
+                >
+                  <Calendar
+                    className={`w-3.5 h-3.5 shrink-0 ${
+                      group.isToday
+                        ? 'text-emerald-400'
+                        : group.isYesterday
+                        ? 'text-amber-400'
+                        : 'text-purple-400'
+                    }`}
+                  />
+                  <span>{group.title}</span>
+                  {group.subtitle && group.subtitle !== group.title && (
+                    <span className="text-[10px] opacity-75 font-mono">• {group.subtitle}</span>
+                  )}
                 </div>
-
-                {/* Line 2: Column E Product Name (Left) | Price (Right) */}
-                <div className="mt-1.5 flex items-center justify-between gap-2">
-                  <div className="text-gray-300 text-xs sm:text-sm font-medium truncate flex-1 min-w-0 pr-2">
-                    <span className="truncate block">
-                      {order.product || 'প্রোডাক্ট নেই'}
-                    </span>
-                  </div>
-
-                  <div className="shrink-0 flex items-center gap-1 font-mono font-bold text-emerald-400 text-sm sm:text-base tracking-tight">
-                    <span>{displayAmount}.00 BDT</span>
-                  </div>
-                </div>
+                <div className="flex-1 h-px bg-[#232636]" />
+                <span className="text-[10px] text-gray-400 font-mono shrink-0 bg-[#161722] px-2 py-0.5 rounded border border-[#232636]">
+                  {group.items.length} টি অর্ডার
+                </span>
               </div>
-            );
-          })
+
+              {/* Order Cards for this Date Group */}
+              <div className="space-y-2 sm:space-y-2.5">
+                {group.items.map((order, index) => {
+                  const orderKey = getOrderKey(order, index);
+                  const statusStyle = getStatusBadgeStyle(order.status);
+                  const displayAmount = order.total || order.amount || 599;
+
+                  return (
+                    <div
+                      key={orderKey}
+                      onClick={() => onSelectOrder(order)}
+                      className={`bg-[#141419] hover:bg-[#181822] active:bg-[#1c1c28] border border-[#232430] hover:border-[#383a4c] rounded-xl p-3 sm:px-4 sm:py-3 shadow-xs transition-all cursor-pointer select-none relative ${
+                        activeDropdown?.orderKey === orderKey ? 'z-30' : 'z-0'
+                      }`}
+                    >
+                      {/* Line 1: Name & Date (Left) | Edit Pen & Order Status Change Dropdown (Right) */}
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          {order.date && (
+                            <span className="text-[10px] text-gray-500/70 font-mono block leading-none mb-0.5 select-none">
+                              {order.date}
+                            </span>
+                          )}
+                          <span className="font-bold text-gray-100 text-sm sm:text-base truncate block">
+                            {order.customerName || 'নামবিহীন'}
+                          </span>
+                        </div>
+
+                        {/* Actions on Right: Quick Edit Pen + Order Status Change Dropdown */}
+                        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
+                          {/* Quick Edit Pen Button */}
+                          <button
+                            type="button"
+                            onClick={(e) => openEditModal(e, order)}
+                            className="p-1.5 rounded-lg bg-[#1e2230] hover:bg-[#282e42] active:scale-95 text-pink-400 hover:text-pink-300 border border-[#2b334a] transition-all flex items-center justify-center cursor-pointer"
+                            title="অর্ডার এডিট করুন"
+                          >
+                            <Edit3 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                          </button>
+
+                          {/* Order Status Change Dropdown */}
+                          <div className="relative">
+                            <button
+                              type="button"
+                              onClick={(e) => toggleDropdown(e, orderKey, 'status')}
+                              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border transition-all cursor-pointer active:scale-95 ${statusStyle.badge}`}
+                              title="অর্ডার স্ট্যাটাস পরিবর্তন করুন"
+                            >
+                              <span className={`w-1.5 h-1.5 rounded-full ${statusStyle.dot}`} />
+                              <span className="truncate max-w-[85px] sm:max-w-none">{statusStyle.label}</span>
+                              <ChevronDown className="w-3 h-3 opacity-70 shrink-0" />
+                            </button>
+
+                            {/* Dropdown Menu for Status */}
+                            {activeDropdown?.orderKey === orderKey && activeDropdown?.type === 'status' && (
+                              <div
+                                onClick={(e) => e.stopPropagation()}
+                                className="absolute right-0 top-full mt-1 w-44 max-h-56 overflow-y-auto bg-[#181822] border border-[#2f2f40] rounded-xl shadow-2xl py-1 z-50 animate-fadeIn"
+                              >
+                                <div className="px-3 py-1 text-[11px] text-gray-400 font-semibold border-b border-[#252535] sticky top-0 bg-[#181822] z-10">
+                                  স্ট্যাটাস পরিবর্তন করুন
+                                </div>
+                                {availableStatuses.map((st) => (
+                                  <button
+                                    key={st}
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      onUpdateOrderStatus(order, st);
+                                      setActiveDropdown(null);
+                                    }}
+                                    className="w-full text-left px-3 py-2 text-xs text-gray-200 hover:bg-[#252535] flex items-center justify-between cursor-pointer"
+                                  >
+                                    <span>{st}</span>
+                                    {order.status === st && (
+                                      <Check className="w-3.5 h-3.5 text-[#7de3e0]" />
+                                    )}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Line 2: Column E Product Name (Left) | Price (Right) */}
+                      <div className="mt-1.5 flex items-center justify-between gap-2">
+                        <div className="text-gray-300 text-xs sm:text-sm font-medium truncate flex-1 min-w-0 pr-2">
+                          <span className="truncate block">
+                            {order.product || 'প্রোডাক্ট নেই'}
+                          </span>
+                        </div>
+
+                        <div className="shrink-0 flex items-center gap-1 font-mono font-bold text-emerald-400 text-sm sm:text-base tracking-tight">
+                          <span>{displayAmount}.00 BDT</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))
         )}
       </div>
 

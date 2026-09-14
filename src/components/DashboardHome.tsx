@@ -5,8 +5,8 @@ import {
   Boxes,
 } from 'lucide-react';
 import { Order, OrderStatus, Product, StockMovementLog, Sheet3ProductEntry } from '../types';
-import { INITIAL_DAILY_TREND } from '../data/initialOrders';
 import { StockManagerHome } from './StockManagerHome';
+import { OrderCalendar } from './OrderCalendar';
 
 interface DashboardHomeProps {
   orders: Order[];
@@ -34,6 +34,7 @@ export const DashboardHome: React.FC<DashboardHomeProps> = ({
   onOpenNewOrder,
   onSyncSheet,
   isSyncing,
+  onSelectOrder,
   products,
   onUpdateProductStock,
   onApproveCancelReturn,
@@ -237,89 +238,11 @@ export const DashboardHome: React.FC<DashboardHomeProps> = ({
         })}
       </div>
 
-      {/* দৈনিক অর্ডারের গ্রাফ (Full Width Graph) */}
-      <div className="w-full bg-[#12151f] border border-[#1e2436] rounded-2xl p-4 sm:p-6 flex flex-col justify-between">
-        <div>
-          <div className="flex items-center justify-between mb-4 sm:mb-6">
-            <div>
-              <h3 className="text-base sm:text-lg font-bold text-white tracking-tight">
-                দৈনিক অর্ডারের গ্রাফ
-              </h3>
-              <p className="text-xs text-gray-400 mt-0.5">
-                সপ্তাহের দিন অনুযায়ী মোট অর্ডারের পরিমাণ
-              </p>
-            </div>
-            <span className="text-[11px] sm:text-xs px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-full bg-pink-500/10 text-pink-400 border border-pink-500/20 font-medium">
-              এই সপ্তাহ
-            </span>
-          </div>
-
-          {/* Neon Bar Graph */}
-          <div className="relative pt-4 sm:pt-6 pb-2">
-            {/* Y Axis Grid lines */}
-            <div className="absolute inset-0 flex flex-col justify-between pointer-events-none text-[10px] sm:text-[11px] text-gray-600 pr-2">
-              <div className="border-b border-gray-800/80 pb-0.5 flex justify-between">
-                <span>80</span>
-              </div>
-              <div className="border-b border-gray-800/80 pb-0.5 flex justify-between">
-                <span>60</span>
-              </div>
-              <div className="border-b border-gray-800/80 pb-0.5 flex justify-between">
-                <span>40</span>
-              </div>
-              <div className="border-b border-gray-800/80 pb-0.5 flex justify-between">
-                <span>20</span>
-              </div>
-              <div className="border-b border-gray-800/80 pb-0.5 flex justify-between">
-                <span>0</span>
-              </div>
-            </div>
-
-            {/* Bars container */}
-            <div className="relative z-10 flex items-end justify-between h-44 sm:h-52 px-2 sm:px-6 pt-4">
-              {INITIAL_DAILY_TREND.map((item, index) => {
-                const maxVal = 80;
-                const heightPercent = Math.min(100, Math.round((item.orders / maxVal) * 100));
-                const isHighlight = index === 2 || index === 4;
-
-                return (
-                  <div
-                    key={`trend-${item.day}-${index}`}
-                    className="flex flex-col items-center flex-1 group cursor-pointer"
-                  >
-                    <div className="relative w-full flex flex-col items-center">
-                      {/* Tooltip on hover */}
-                      <div className="absolute -top-7 opacity-0 group-hover:opacity-100 transition-opacity bg-pink-950/90 text-pink-300 text-[10px] px-1.5 py-0.5 rounded border border-pink-500/40 pointer-events-none whitespace-nowrap z-20">
-                        {item.orders} টি
-                      </div>
-
-                      {/* Bar */}
-                      <div
-                        style={{ height: `${heightPercent}%` }}
-                        className={`w-5 sm:w-10 rounded-t-lg transition-all duration-300 group-hover:scale-y-105 ${
-                          isHighlight
-                            ? 'bg-gradient-to-t from-pink-700 via-rose-500 to-pink-400 shadow-lg shadow-pink-500/30 neon-pink-glow'
-                            : 'bg-gradient-to-t from-gray-800 via-purple-900/60 to-purple-500/70'
-                        }`}
-                      />
-                    </div>
-
-                    {/* Day Label */}
-                    <span className="text-[10px] sm:text-xs text-gray-400 font-medium mt-2">
-                      {item.day}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-
-        <div className="pt-3 sm:pt-4 mt-3 sm:mt-4 border-t border-[#1c2232] flex items-center justify-between text-xs text-gray-400">
-          <span>সর্বোচ্চ বিক্রি: <strong>বুধবার (৭৮ টি)</strong></span>
-          <span className="text-pink-400 font-semibold">গড়: ৪৪ টি/দিন</span>
-        </div>
-      </div>
+      {/* All Product Order Calendar (তারিখ অনুযায়ী কবে কয়টা অর্ডার) */}
+      <OrderCalendar
+        orders={orders}
+        onSelectOrder={onSelectOrder}
+      />
 
       {/* Stock Management & Cancel/Return Approval Section */}
       <div className="pt-2">

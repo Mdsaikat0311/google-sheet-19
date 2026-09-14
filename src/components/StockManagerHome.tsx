@@ -23,6 +23,7 @@ import {
   Lock,
 } from 'lucide-react';
 import { Product, Order, StockMovementLog, Sheet3ProductEntry } from '../types';
+import { groupItemsByDate } from '../utils/dateGrouping';
 
 // The exact 6 primary products configured in Google Sheet 3
 export const SHEET3_PRIMARY_PRODUCTS: string[] = [
@@ -124,6 +125,7 @@ export const StockManagerHome: React.FC<StockManagerHomeProps> = ({
   // Filter & Search in Sheet 3 Product Entries
   const [searchSheet3Query, setSearchSheet3Query] = useState<string>('');
   const [sourceFilter, setSourceFilter] = useState<string>('all');
+  const [productFilter, setProductFilter] = useState<string>('all');
 
   // Existing Edit stock state (Product object fallback)
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
@@ -333,6 +335,9 @@ export const StockManagerHome: React.FC<StockManagerHomeProps> = ({
     }
   };
 
+  // Strictly the exact 6 primary products configured in Google Sheet
+  const allAvailableProducts = SHEET3_PRIMARY_PRODUCTS;
+
   // Filter & Search Sheet 3 Entries
   const hasSheet3Data = sheet3Entries && sheet3Entries.length > 0;
   const filteredSheet3Entries = (sheet3Entries || []).filter((entry) => {
@@ -348,46 +353,58 @@ export const StockManagerHome: React.FC<StockManagerHomeProps> = ({
       sourceFilter === 'all' ||
       (entry.source && entry.source.toLowerCase().includes(sourceFilter.toLowerCase()));
 
-    return matchesSearch && matchesSource;
+    const matchesProduct =
+      productFilter === 'all' ||
+      !productFilter ||
+      (entry.productName &&
+        (entry.productName.toLowerCase().trim() === productFilter.toLowerCase().trim() ||
+          entry.productName.toLowerCase().includes(productFilter.toLowerCase().trim()) ||
+          productFilter.toLowerCase().includes(entry.productName.toLowerCase().trim())));
+
+    return matchesSearch && matchesSource && matchesProduct;
+  });
+
+  const filteredFallbackEntries = productEntryStats.filter(({ product }) => {
+    const q = searchSheet3Query.toLowerCase().trim();
+    const matchesSearch =
+      !q ||
+      product.name.toLowerCase().includes(q) ||
+      (product.category && product.category.toLowerCase().includes(q));
+
+    const matchesProduct =
+      productFilter === 'all' ||
+      !productFilter ||
+      product.name.toLowerCase().trim() === productFilter.toLowerCase().trim() ||
+      product.name.toLowerCase().includes(productFilter.toLowerCase().trim()) ||
+      productFilter.toLowerCase().includes(product.name.toLowerCase().trim());
+
+    return matchesSearch && matchesProduct;
   });
 
   const displayCount = hasSheet3Data
     ? filteredSheet3Entries.length
-    : productEntryStats.length;
+    : filteredFallbackEntries.length;
+
+  // Group entries by date (Today, Yesterday, Date-wise)
+  const slicedSheet3Entries = filteredSheet3Entries.slice(0, visibleProductsCount);
+  const groupedSheet3Entries = groupItemsByDate(slicedSheet3Entries, (e) => e.date);
+
+  const slicedFallbackEntries = filteredFallbackEntries.slice(0, visibleProductsCount);
+  const groupedFallbackEntries = groupItemsByDate(slicedFallbackEntries, (e) => e.entryDate);
 
   return (
     <div className="space-y-3">
-      {/* Section Header with Slim Tab Switcher and New Stock Entry Button */}
+      {/* Section Header with Clean Title and New Stock Entry Button */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 bg-[#12151f] border border-[#1e2436] rounded-xl px-3.5 py-2.5">
         <div className="flex items-center gap-2">
           <div className="w-2 h-2 rounded-full bg-pink-500 animate-pulse" />
-          <h3 className="text-xs sm:text-sm font-bold text-white tracking-tight flex items-center gap-1.5 flex-wrap">
-            <span>রিয়েলটাইম স্টক এন্ট্রি ও অনুমোদন কেন্দ্র</span>
-            <span className="text-[10px] px-1.5 py-0.2 rounded bg-pink-500/10 text-pink-400 font-mono border border-pink-500/30 flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block" />
-              Live Sheet3
-            </span>
+          <h3 className="text-xs sm:text-sm font-bold text-white tracking-tight">
+            রিয়েলটাইম স্টক এন্ট্রি ও অনুমোদন কেন্দ্র
           </h3>
         </div>
 
-        {/* Action Controls: New Stock Button + Product Entry Card Badge */}
+        {/* Action Controls */}
         <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
-          {/* New Stock Entry Button */}
-          <button
-            onClick={() => {
-              setIsNewStockOpen(true);
-              setNewStockMode('sheet3_direct');
-              if (products.length > 0 && !selectedProductId) {
-                setSelectedProductId(products[0].id);
-              }
-            }}
-            className="px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-500 hover:to-rose-500 text-white shadow-md shadow-pink-600/20 active:scale-95"
-            title="নতুন স্টক এন্ট্রি করুন (Sheet 3 এ যোগ হবে)"
-          >
-            <PlusCircle className="w-3.5 h-3.5" />
-            <span>+ New Stock এন্ট্রি</span>
-          </button>
-
           {/* Product Entry Card Badge */}
           <div className="flex items-center gap-1.5 bg-[#0c0e15] px-2.5 py-1.5 rounded-lg border border-[#20273a] text-xs font-semibold text-pink-400">
             <Package className="w-3.5 h-3.5" />
@@ -399,249 +416,323 @@ export const StockManagerHome: React.FC<StockManagerHomeProps> = ({
       {/* প্রোডাক্ট ভিত্তিক এন্ট্রি ও শিট ৩ রিয়েলটাইম কার্ড (Mobile Optimized & Fully Editable) */}
       <div className="space-y-2.5">
           {/* Search, Filter & Live Sync Status Bar */}
-          <div className="bg-[#12151f] border border-[#1e2436] rounded-xl p-2.5 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 text-xs">
-            <div className="flex items-center gap-2 flex-1">
-              <div className="relative flex-1">
-                <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-                <input
-                  type="text"
-                  value={searchSheet3Query}
-                  onChange={(e) => setSearchSheet3Query(e.target.value)}
-                  placeholder="প্রোডাক্ট নাম, সোর্স বা রো নাম্বার দিয়ে খুঁজুন..."
-                  className="w-full bg-[#0c0e15] border border-[#232b3e] focus:border-pink-500 rounded-lg pl-8 pr-3 py-1.5 text-xs text-white placeholder-gray-500 focus:outline-hidden"
-                />
-                {searchSheet3Query && (
+          <div className="bg-[#12151f] border border-[#1e2436] rounded-xl p-2.5 text-xs">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              {/* Product Select Dropdown (Smart Filter) */}
+              <div className="flex items-center gap-2 bg-[#0c0e15] border border-[#232b3e] hover:border-pink-500/50 focus-within:border-pink-500 rounded-lg px-3 py-1.5 text-xs transition-colors flex-1 sm:flex-initial">
+                <Filter className="w-3.5 h-3.5 text-pink-400 shrink-0" />
+                <span className="text-[11px] text-gray-400 font-medium shrink-0">ফিল্টার:</span>
+                <select
+                  value={productFilter}
+                  onChange={(e) => setProductFilter(e.target.value)}
+                  className="bg-transparent text-xs text-white font-semibold focus:outline-hidden cursor-pointer w-full sm:w-auto sm:min-w-[180px] truncate"
+                  title="প্রোডাক্ট ফিল্টার"
+                >
+                  <option value="all" className="bg-[#12151f] text-gray-200">সব প্রোডাক্ট (All Products)</option>
+                  {allAvailableProducts.map((p) => (
+                    <option key={p} value={p} className="bg-[#12151f] text-white">
+                      {p}
+                    </option>
+                  ))}
+                </select>
+                {productFilter !== 'all' && (
                   <button
-                    onClick={() => setSearchSheet3Query('')}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white"
+                    type="button"
+                    onClick={() => setProductFilter('all')}
+                    className="text-gray-400 hover:text-pink-400 p-0.5 cursor-pointer ml-auto sm:ml-0"
+                    title="ফিল্টার মুছুন"
                   >
-                    <X className="w-3 h-3" />
+                    <X className="w-3.5 h-3.5" />
                   </button>
                 )}
               </div>
 
-              {/* Source Quick Filter */}
-              <div className="flex items-center gap-1 shrink-0 overflow-x-auto">
-                <button
-                  onClick={() => setSourceFilter('all')}
-                  className={`px-2 py-1 rounded-md text-[11px] font-medium whitespace-nowrap transition-colors cursor-pointer ${
-                    sourceFilter === 'all'
-                      ? 'bg-pink-600 text-white'
-                      : 'bg-[#181d2a] text-gray-400 hover:text-gray-200'
-                  }`}
-                >
-                  সব
-                </button>
-                <button
-                  onClick={() => setSourceFilter('stock')}
-                  className={`px-2 py-1 rounded-md text-[11px] font-medium whitespace-nowrap transition-colors cursor-pointer ${
-                    sourceFilter === 'stock'
-                      ? 'bg-emerald-600 text-white'
-                      : 'bg-[#181d2a] text-gray-400 hover:text-gray-200'
-                  }`}
-                >
-                  Stock
-                </button>
-                <button
-                  onClick={() => setSourceFilter('return')}
-                  className={`px-2 py-1 rounded-md text-[11px] font-medium whitespace-nowrap transition-colors cursor-pointer ${
-                    sourceFilter === 'return'
-                      ? 'bg-rose-600 text-white'
-                      : 'bg-[#181d2a] text-gray-400 hover:text-gray-200'
-                  }`}
-                >
-                  Return
-                </button>
-                <button
-                  onClick={() => setSourceFilter('order')}
-                  className={`px-2 py-1 rounded-md text-[11px] font-medium whitespace-nowrap transition-colors cursor-pointer ${
-                    sourceFilter === 'order'
-                      ? 'bg-amber-600 text-white'
-                      : 'bg-[#181d2a] text-gray-400 hover:text-gray-200'
-                  }`}
-                >
-                  Delivery
-                </button>
-              </div>
-            </div>
+              {/* Action Controls: Live Refresh + Reset Button */}
+              <div className="flex items-center gap-2 shrink-0">
+                {/* Live Refresh Button */}
+                {onRefreshSheet3 && (
+                  <button
+                    onClick={onRefreshSheet3}
+                    disabled={isRefreshingSheet3}
+                    className="px-3 py-1.5 rounded-lg bg-pink-600/10 hover:bg-pink-600/20 text-pink-400 hover:text-pink-300 border border-pink-500/30 flex items-center gap-1.5 text-xs font-semibold cursor-pointer transition-all active:scale-95 disabled:opacity-50 shrink-0"
+                    title="শিট ৩ থেকে রিলোড করুন"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isRefreshingSheet3 ? 'animate-spin text-pink-400' : ''}`} />
+                    <span>{isRefreshingSheet3 ? 'সিঙ্ক...' : 'রিফ্রেশ'}</span>
+                  </button>
+                )}
 
-            {/* Live Refresh Button */}
-            <div className="flex items-center justify-between sm:justify-end gap-2 shrink-0 pt-1 sm:pt-0 border-t sm:border-t-0 border-[#1c2232]">
-              <span className="text-[11px] text-gray-400 flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                <span>শিট ৩ রিয়েলটাইম</span>
-              </span>
-              {onRefreshSheet3 && (
-                <button
-                  onClick={onRefreshSheet3}
-                  disabled={isRefreshingSheet3}
-                  className="px-2.5 py-1 rounded-lg bg-[#181d2a] hover:bg-[#202738] text-pink-400 hover:text-pink-300 border border-[#252d40] flex items-center gap-1 text-[11px] font-medium cursor-pointer transition-all active:scale-95 disabled:opacity-50"
-                  title="শিট ৩ থেকে রিলোড করুন"
-                >
-                  <RefreshCw className={`w-3 h-3 ${isRefreshingSheet3 ? 'animate-spin text-pink-400' : ''}`} />
-                  <span>{isRefreshingSheet3 ? 'সিঙ্ক হচ্ছে...' : 'রিফ্রেশ'}</span>
-                </button>
-              )}
+                {/* Reset button (if filter active) */}
+                {productFilter !== 'all' && (
+                  <button
+                    onClick={() => setProductFilter('all')}
+                    className="flex items-center gap-1 text-xs text-gray-300 hover:text-white font-medium px-2.5 py-1.5 rounded-lg bg-[#181d2a] hover:bg-[#202738] border border-[#252d40] shrink-0 cursor-pointer transition-colors"
+                    title="ফিল্টার রিসেট করুন"
+                  >
+                    <RotateCcw className="w-3 h-3 text-pink-400" />
+                    <span>রিসেট</span>
+                  </button>
+                )}
+              </div>
             </div>
           </div>
 
-          {/* Cards Container: Mobile Optimized 2-Line Slim Card Layout */}
-          <div className="space-y-1.5">
-            {hasSheet3Data ? (
-              filteredSheet3Entries.slice(0, visibleProductsCount).map((entry, idx) => {
-                const isOutOfStock = entry.currentStock <= 0;
-                const isLowStock = entry.currentStock > 0 && entry.currentStock <= 5;
-                const isReturn = (entry.source || '').toLowerCase().includes('return');
-                const isDelivery = (entry.source || '').toLowerCase().includes('delivery') || (entry.source || '').toLowerCase().includes('order');
-
-                return (
-                  <div
-                    key={entry.id || `sheet3-row-${entry.rowIndex}-${idx}`}
-                    className="bg-[#12151f] hover:bg-[#151926] border border-[#1e2436] hover:border-pink-500/40 rounded-xl px-2.5 py-2 sm:px-3 sm:py-2.5 transition-all shadow-xs flex flex-col gap-1.5 group"
-                  >
-                    {/* Line 1: Top Bar - Source Badge (Left) & Date Badge + Edit (Top Side/Corner) */}
-                    <div className="flex items-center justify-between gap-1.5 min-w-0">
-                      <span
-                        className={`text-[9px] sm:text-[10px] font-semibold px-1.5 py-0.5 rounded-md border shrink-0 ${
-                          isReturn
-                            ? 'bg-rose-500/20 text-rose-300 border-rose-500/30'
-                            : isDelivery
-                            ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
-                            : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+          {/* Cards Container: Grouped & Divided by Date (Today, Yesterday, Date) */}
+          <div className="space-y-3">
+            {(hasSheet3Data ? groupedSheet3Entries.length === 0 : groupedFallbackEntries.length === 0) ? (
+              <div className="bg-[#12151f] border border-[#1e2436] rounded-xl p-8 text-center text-gray-400">
+                <Package className="w-10 h-10 text-gray-600 mx-auto mb-2" />
+                <p className="text-sm font-semibold text-gray-300">
+                  {productFilter !== 'all'
+                    ? `"${productFilter}" এর কোনো এন্ট্রি পাওয়া যায়নি`
+                    : 'কোনো এন্ট্রি পাওয়া যায়নি'}
+                </p>
+                <p className="text-xs text-gray-500 mt-1">
+                  অন্য কোনো প্রোডাক্ট সিলেক্ট করুন অথবা ফিল্টার রিসেট করুন।
+                </p>
+                <button
+                  onClick={() => {
+                    setProductFilter('all');
+                    setSourceFilter('all');
+                    setSearchSheet3Query('');
+                  }}
+                  className="mt-3 px-3 py-1.5 rounded-lg bg-pink-600 hover:bg-pink-500 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  <span>সব ফিল্টার রিসেট করুন</span>
+                </button>
+              </div>
+            ) : hasSheet3Data ? (
+              groupedSheet3Entries.map((group) => (
+                <div key={group.key} className="space-y-1.5 pt-1.5 first:pt-0">
+                  {/* Date Section Header Divider */}
+                  <div className="flex items-center gap-2 px-1 py-1">
+                    <div
+                      className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-semibold ${
+                        group.isToday
+                          ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
+                          : group.isYesterday
+                          ? 'bg-amber-500/15 border-amber-500/30 text-amber-300'
+                          : 'bg-[#161a26] border-[#222a3d] text-gray-300'
+                      }`}
+                    >
+                      <Calendar
+                        className={`w-3.5 h-3.5 shrink-0 ${
+                          group.isToday
+                            ? 'text-emerald-400'
+                            : group.isYesterday
+                            ? 'text-amber-400'
+                            : 'text-pink-400'
                         }`}
-                      >
-                        {entry.source || 'Stock'}
-                      </span>
-
-                      {/* Top Side (উপরে সাইডে): Date Badge & Edit Action */}
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <span className="flex items-center gap-1 text-[10px] sm:text-[11px] text-gray-400 font-mono bg-[#161a26] px-1.5 sm:px-2 py-0.5 rounded-md border border-[#202738]">
-                          <Calendar className="w-2.5 h-2.5 text-pink-400 shrink-0" />
-                          <span className="truncate max-w-[90px] sm:max-w-none">{entry.date || '০৮/০৯/২৬'}</span>
-                        </span>
-
-                        <button
-                          onClick={() => openSheet3Editor(entry)}
-                          className="shrink-0 px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-md bg-pink-500/10 hover:bg-pink-600 text-pink-300 hover:text-white border border-pink-500/30 hover:border-pink-500 flex items-center gap-1 text-[10px] sm:text-[11px] font-semibold transition-all cursor-pointer active:scale-95 shadow-xs"
-                          title="শিট ৩ এর এই রো এর সব তথ্য এডিট করুন"
-                        >
-                          <Edit3 className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
-                          <span>Edit</span>
-                        </button>
-                      </div>
+                      />
+                      <span>{group.title}</span>
+                      {group.subtitle && group.subtitle !== group.title && (
+                        <span className="text-[10px] opacity-75 font-mono">• {group.subtitle}</span>
+                      )}
                     </div>
-
-                    {/* Line 2: Product Name & Icon (Full Width, Clear & Readable) */}
-                    <div className="flex items-center gap-2 min-w-0">
-                      <div className="w-5 h-5 rounded-md flex items-center justify-center shrink-0 bg-pink-500/20 text-pink-400 border border-pink-500/30">
-                        <Package className="w-3 h-3" />
-                      </div>
-                      <h4 className="font-bold text-white text-xs sm:text-sm font-mono truncate leading-tight flex-1">
-                        {entry.productName}
-                      </h4>
-                    </div>
-
-                    {/* Line 2: Compact Balanced 4-Column Metrics for Mobile */}
-                    <div className="grid grid-cols-4 gap-1 sm:gap-1.5 pt-1.5 border-t border-[#181e2e]/80 text-[10px] sm:text-xs font-mono text-center items-center justify-center">
-                      {/* Stock In */}
-                      <div className="bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 px-1 py-1 rounded-md flex items-center justify-center text-center gap-0.5 sm:gap-1">
-                        <span className="text-[9px] opacity-80">In:</span>
-                        <span className="font-bold">{entry.stockIn !== undefined && entry.stockIn !== '' ? entry.stockIn : 0}</span>
-                      </div>
-
-                      {/* Stock Out */}
-                      <div className="bg-rose-500/10 text-rose-300 border border-rose-500/20 px-1 py-1 rounded-md flex items-center justify-center text-center gap-0.5 sm:gap-1">
-                        <span className="text-[9px] opacity-80">Out:</span>
-                        <span className="font-bold">{entry.stockOut !== undefined && entry.stockOut !== '' ? entry.stockOut : 0}</span>
-                      </div>
-
-                      {/* Current Stock */}
-                      <div
-                        className={`px-1 py-1 rounded-md font-bold border flex items-center justify-center text-center gap-0.5 sm:gap-1 ${
-                          isOutOfStock
-                            ? 'bg-rose-500/20 text-rose-400 border-rose-500/30'
-                            : isLowStock
-                            ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
-                            : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
-                        }`}
-                      >
-                        <span className="text-[9px] opacity-75">স্টক:</span>
-                        <span>{entry.currentStock !== undefined ? entry.currentStock : 0}</span>
-                      </div>
-
-                      {/* Price */}
-                      <div className="bg-pink-500/10 text-pink-300 border border-pink-500/20 px-1 py-1 rounded-md font-bold flex items-center justify-center text-center">
-                        <span>৳{entry.currentPrice !== undefined && entry.currentPrice !== '' ? entry.currentPrice : '৫৯৯'}</span>
-                      </div>
-                    </div>
+                    <div className="flex-1 h-px bg-[#1e2436]" />
+                    <span className="text-[10px] text-gray-400 font-mono shrink-0 bg-[#121520] px-2 py-0.5 rounded-md border border-[#1e2436]">
+                      {group.items.length} টি এন্ট্রি
+                    </span>
                   </div>
-                );
-              })
+
+                  {/* Stock Entry Cards for this Date Group */}
+                  <div className="space-y-1.5">
+                    {group.items.map((entry, idx) => {
+                      const isOutOfStock = entry.currentStock <= 0;
+                      const isLowStock = entry.currentStock > 0 && entry.currentStock <= 5;
+                      const isReturn = (entry.source || '').toLowerCase().includes('return');
+                      const isDelivery = (entry.source || '').toLowerCase().includes('delivery') || (entry.source || '').toLowerCase().includes('order');
+
+                      return (
+                        <div
+                          key={entry.id || `sheet3-row-${entry.rowIndex}-${idx}`}
+                          className="bg-[#12151f] hover:bg-[#151926] border border-[#1e2436] hover:border-pink-500/40 rounded-xl px-2.5 py-2 sm:px-3 sm:py-2.5 transition-all shadow-xs flex flex-col gap-1.5 group"
+                        >
+                          {/* Line 1: Top Bar - Source Badge (Left) & Date Badge + Edit (Top Side/Corner) */}
+                          <div className="flex items-center justify-between gap-1.5 min-w-0">
+                            <span
+                              className={`text-[9px] sm:text-[10px] font-semibold px-1.5 py-0.5 rounded-md border shrink-0 ${
+                                isReturn
+                                  ? 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+                                  : isDelivery
+                                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                                  : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                              }`}
+                            >
+                              {entry.source || 'Stock'}
+                            </span>
+
+                            {/* Top Side (উপরে সাইডে): Date Badge & Edit Action */}
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <span className="flex items-center gap-1 text-[10px] sm:text-[11px] text-gray-400 font-mono bg-[#161a26] px-1.5 sm:px-2 py-0.5 rounded-md border border-[#202738]">
+                                <Calendar className="w-2.5 h-2.5 text-pink-400 shrink-0" />
+                                <span className="truncate max-w-[90px] sm:max-w-none">{entry.date || '০৮/০৯/২৬'}</span>
+                              </span>
+
+                              <button
+                                onClick={() => openSheet3Editor(entry)}
+                                className="shrink-0 px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-md bg-pink-500/10 hover:bg-pink-600 text-pink-300 hover:text-white border border-pink-500/30 hover:border-pink-500 flex items-center gap-1 text-[10px] sm:text-[11px] font-semibold transition-all cursor-pointer active:scale-95 shadow-xs"
+                                title="শিট ৩ এর এই রো এর সব তথ্য এডিট করুন"
+                              >
+                                <Edit3 className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
+                                <span>Edit</span>
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Line 2: Product Name & Icon (Full Width, Clear & Readable) */}
+                          <div className="flex items-center gap-2 min-w-0">
+                            <div className="w-5 h-5 rounded-md flex items-center justify-center shrink-0 bg-pink-500/20 text-pink-400 border border-pink-500/30">
+                              <Package className="w-3 h-3" />
+                            </div>
+                            <h4 className="font-bold text-white text-xs sm:text-sm font-mono truncate leading-tight flex-1">
+                              {entry.productName}
+                            </h4>
+                          </div>
+
+                          {/* Line 2: Compact Balanced 4-Column Metrics for Mobile */}
+                          <div className="grid grid-cols-4 gap-1 sm:gap-1.5 pt-1.5 border-t border-[#181e2e]/80 text-[10px] sm:text-xs font-mono text-center items-center justify-center">
+                            {/* Stock In */}
+                            <div className="bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 px-1 py-1 rounded-md flex items-center justify-center text-center gap-0.5 sm:gap-1">
+                              <span className="text-[9px] opacity-80">In:</span>
+                              <span className="font-bold">{entry.stockIn !== undefined && entry.stockIn !== '' ? entry.stockIn : 0}</span>
+                            </div>
+
+                            {/* Stock Out */}
+                            <div className="bg-rose-500/10 text-rose-300 border border-rose-500/20 px-1 py-1 rounded-md flex items-center justify-center text-center gap-0.5 sm:gap-1">
+                              <span className="text-[9px] opacity-80">Out:</span>
+                              <span className="font-bold">{entry.stockOut !== undefined && entry.stockOut !== '' ? entry.stockOut : 0}</span>
+                            </div>
+
+                            {/* Current Stock */}
+                            <div
+                              className={`px-1 py-1 rounded-md font-bold border flex items-center justify-center text-center gap-0.5 sm:gap-1 ${
+                                isOutOfStock
+                                  ? 'bg-rose-500/20 text-rose-400 border-rose-500/30'
+                                  : isLowStock
+                                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                                  : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                              }`}
+                            >
+                              <span className="text-[9px] opacity-75">স্টক:</span>
+                              <span>{entry.currentStock !== undefined ? entry.currentStock : 0}</span>
+                            </div>
+
+                            {/* Price */}
+                            <div className="bg-pink-500/10 text-pink-300 border border-pink-500/20 px-1 py-1 rounded-md font-bold flex items-center justify-center text-center">
+                              <span>৳{entry.currentPrice !== undefined && entry.currentPrice !== '' ? entry.currentPrice : '৫৯৯'}</span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))
             ) : (
               /* Fallback if Sheet 3 is loading or empty */
-              productEntryStats.slice(0, visibleProductsCount).map(({ product, totalEntryPieces, entryDate, entryTime }, idx) => {
-                const isLowStock = product.stock > 0 && product.stock <= 5;
-                const isOutOfStock = product.stock <= 0;
-
-                return (
-                  <div
-                    key={product.id ? `prod-${product.id}-${idx}` : `prod-${idx}`}
-                    className="bg-[#12151f] hover:bg-[#151926] border border-[#1e2436] hover:border-pink-500/30 rounded-xl px-3 py-2 flex items-center justify-between gap-2.5 transition-all text-xs group"
-                  >
-                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                      <div className="w-5 h-5 rounded-md flex items-center justify-center shrink-0 bg-pink-500/20 text-pink-400 border border-pink-500/30">
-                        <Package className="w-3 h-3" />
-                      </div>
-                      <div className="min-w-0 flex-1 truncate">
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono font-bold text-white mr-1.5 truncate">
-                            {product.name}
-                          </span>
-                          <span className="text-[10px] text-gray-400 font-mono bg-[#181d2c] px-1.5 py-0.2 rounded border border-[#232c40] shrink-0">
-                            {product.category || 'পণ্য'}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-2 text-[10px] text-gray-400 mt-0.5 flex-wrap">
-                          <span className="flex items-center gap-1 text-gray-300 font-mono">
-                            <Calendar className="w-2.5 h-2.5 text-pink-400" />
-                            {entryDate}
-                          </span>
-                          <span>•</span>
-                          <span className="flex items-center gap-1 text-pink-300 font-mono">
-                            <Clock className="w-2.5 h-2.5 text-pink-400" />
-                            {entryTime}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="shrink-0 flex items-center gap-2 sm:gap-2.5 text-right">
-                      <span className="text-[11px] font-mono font-bold text-pink-400">
-                        {totalEntryPieces} পিস এন্ট্রি
-                      </span>
-                      <span
-                        className={`font-mono font-bold text-xs px-2 py-0.5 rounded border ${
-                          isOutOfStock
-                            ? 'bg-rose-500/20 text-rose-400 border-rose-500/30'
-                            : isLowStock
-                            ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
-                            : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+              groupedFallbackEntries.map((group) => (
+                <div key={group.key} className="space-y-1.5 pt-1.5 first:pt-0">
+                  {/* Date Section Header Divider */}
+                  <div className="flex items-center gap-2 px-1 py-1">
+                    <div
+                      className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-semibold ${
+                        group.isToday
+                          ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
+                          : group.isYesterday
+                          ? 'bg-amber-500/15 border-amber-500/30 text-amber-300'
+                          : 'bg-[#161a26] border-[#222a3d] text-gray-300'
+                      }`}
+                    >
+                      <Calendar
+                        className={`w-3.5 h-3.5 shrink-0 ${
+                          group.isToday
+                            ? 'text-emerald-400'
+                            : group.isYesterday
+                            ? 'text-amber-400'
+                            : 'text-pink-400'
                         }`}
-                      >
-                        স্টক: {product.stock} পিস
-                      </span>
-                      <button
-                        onClick={() => openStockEditor(product)}
-                        className="px-2.5 py-1 rounded-lg bg-pink-500/10 hover:bg-pink-500/20 text-pink-400 hover:text-pink-300 border border-pink-500/30 flex items-center gap-1 text-[11px] font-semibold transition-all cursor-pointer active:scale-95"
-                        title="স্টক এডিট ও শিট ৩ সিঙ্ক করুন"
-                      >
-                        <Edit3 className="w-3 h-3" />
-                        <span>Edit</span>
-                      </button>
+                      />
+                      <span>{group.title}</span>
+                      {group.subtitle && group.subtitle !== group.title && (
+                        <span className="text-[10px] opacity-75 font-mono">• {group.subtitle}</span>
+                      )}
                     </div>
+                    <div className="flex-1 h-px bg-[#1e2436]" />
+                    <span className="text-[10px] text-gray-400 font-mono shrink-0 bg-[#121520] px-2 py-0.5 rounded-md border border-[#1e2436]">
+                      {group.items.length} টি
+                    </span>
                   </div>
-                );
-              })
+
+                  {/* Fallback Cards */}
+                  <div className="space-y-1.5">
+                    {group.items.map(({ product, totalEntryPieces, entryDate, entryTime }, idx) => {
+                      const isLowStock = product.stock > 0 && product.stock <= 5;
+                      const isOutOfStock = product.stock <= 0;
+
+                      return (
+                        <div
+                          key={product.id ? `prod-${product.id}-${idx}` : `prod-${idx}`}
+                          className="bg-[#12151f] hover:bg-[#151926] border border-[#1e2436] hover:border-pink-500/30 rounded-xl px-3 py-2 flex items-center justify-between gap-2.5 transition-all text-xs group"
+                        >
+                          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                            <div className="w-5 h-5 rounded-md flex items-center justify-center shrink-0 bg-pink-500/20 text-pink-400 border border-pink-500/30">
+                              <Package className="w-3 h-3" />
+                            </div>
+                            <div className="min-w-0 flex-1 truncate">
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono font-bold text-white mr-1.5 truncate">
+                                  {product.name}
+                                </span>
+                                <span className="text-[10px] text-gray-400 font-mono bg-[#181d2c] px-1.5 py-0.2 rounded border border-[#232c40] shrink-0">
+                                  {product.category || 'পণ্য'}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2 text-[10px] text-gray-400 mt-0.5 flex-wrap">
+                                <span className="flex items-center gap-1 text-gray-300 font-mono">
+                                  <Calendar className="w-2.5 h-2.5 text-pink-400" />
+                                  {entryDate}
+                                </span>
+                                <span>•</span>
+                                <span className="flex items-center gap-1 text-pink-300 font-mono">
+                                  <Clock className="w-2.5 h-2.5 text-pink-400" />
+                                  {entryTime}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="shrink-0 flex items-center gap-2 sm:gap-2.5 text-right">
+                            <span className="text-[11px] font-mono font-bold text-pink-400">
+                              {totalEntryPieces} পিস এন্ট্রি
+                            </span>
+                            <span
+                              className={`font-mono font-bold text-xs px-2 py-0.5 rounded border ${
+                                isOutOfStock
+                                  ? 'bg-rose-500/20 text-rose-400 border-rose-500/30'
+                                  : isLowStock
+                                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                                  : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                              }`}
+                            >
+                              স্টক: {product.stock} পিস
+                            </span>
+                            <button
+                              onClick={() => openStockEditor(product)}
+                              className="px-2.5 py-1 rounded-lg bg-pink-500/10 hover:bg-pink-500/20 text-pink-400 hover:text-pink-300 border border-pink-500/30 flex items-center gap-1 text-[11px] font-semibold transition-all cursor-pointer active:scale-95"
+                              title="স্টক এডিট ও শিট ৩ সিঙ্ক করুন"
+                            >
+                              <Edit3 className="w-3 h-3" />
+                              <span>Edit</span>
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))
             )}
           </div>
 
