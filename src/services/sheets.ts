@@ -353,7 +353,7 @@ export const appendSheetOrder = async (
   // Row columns matching screenshot:
   // [Invoice ID, Customer Name, Phone, Address, Product, Source/Amount, Status, Tracking Code, Courier Status, Send to Steadfast, Quantity, Total Spend]
   const row = [
-    '', // Column A
+    order.date || '', // Column A: Date
     order.id || `INV-${Date.now().toString().slice(-4)}`, // Column B: Invoice ID
     order.customerName, // Column C: Customer Name
     order.customerPhone, // Column D: Phone
@@ -367,6 +367,11 @@ export const appendSheetOrder = async (
     order.quantity || 1, // Column L: Quantity
     order.amount || order.total || 0, // Column M: Total Spend
   ];
+
+  // Also trigger Apps Script JSON dispatch in parallel
+  sendNewOrderViaAppsScript(order).catch((err) =>
+    console.warn('[appendSheetOrder] Apps Script new_order warning:', err)
+  );
 
   const appendRange = `'${targetTab}'!A:M`;
   const appendRes = await fetch(
@@ -2107,10 +2112,10 @@ function doPost(e) {
 }
 
 function handleOrderUpdate_(data) {
-  const targetSheetName = data.sheetName || data.tabName || (data.action && data.action.includes('sheet3') ? 'Sheet3' : '');
-  if (targetSheetName === 'Sheet3' || (data.action && data.action.includes('sheet3'))) {
+  const targetSheetName = data.sheetName || data.tabName || (data.action && (data.action.includes('sheet3') || data.action.includes('stock')) ? 'Sheet3' : '');
+  if (targetSheetName === 'Sheet3' || (data.action && (data.action.includes('sheet3') || data.action === 'stock_entry' || data.action === 'add_stock_entry'))) {
     const s3 = getWooSheet_('Sheet3');
-    if (data.action === 'append_sheet3_entry') {
+    if (data.action === 'append_sheet3_entry' || data.action === 'stock_entry' || data.action === 'add_stock_entry') {
       s3.appendRow([
         data.date || new Date().toLocaleString(),
         data.productName || data.product || '',
@@ -2138,6 +2143,43 @@ function handleOrderUpdate_(data) {
   }
 
   const sheet = getWooSheet_();
+
+  // Action: new_order (Append a brand new order row from JSON payload)
+  if (data.action === 'new_order' || data.action === 'create_order' || data.action === 'add_order') {
+    const nextRow = sheet.getLastRow() + 1;
+    const addressVal = data.address !== undefined ? data.address : (data.customerAddress !== undefined ? data.customerAddress : (data.customer_address || ''));
+    const phoneVal = data.number !== undefined ? data.number : (data.phone !== undefined ? data.phone : (data.customerPhone !== undefined ? data.customerPhone : (data.customer_phone || '')));
+    const codVal = data.price !== undefined ? data.price : (data.cod !== undefined ? data.cod : (data.amount !== undefined ? data.amount : (data.total || 0)));
+    const nameVal = data.name !== undefined ? data.name : (data.customer !== undefined ? data.customer : (data.customerName !== undefined ? data.customerName : (data.customer_name || '')));
+    const variantVal = data.productSelect !== undefined ? data.productSelect : (data.selectedProduct !== undefined ? data.selectedProduct : (data.selected_product !== undefined ? data.selected_product : (data.variant || 'Rose 599tk')));
+    const sourceVal = data.orderSource !== undefined ? data.orderSource : (data.source || 'Website');
+    const statusVal = data.orderStatus !== undefined ? data.orderStatus : (data.order_status !== undefined ? data.order_status : (data.status || 'Pending'));
+    const actionVal = data.columnMValue !== undefined ? data.columnMValue : (data.courierAction !== undefined ? data.courierAction : (data.courier_action !== undefined ? data.courier_action : (data.steadfastStatus || 'No Sellect')));
+    const qtyVal = data.quantity !== undefined ? data.quantity : (data.qty || 1);
+    const dateVal = data.date || new Date().toLocaleString();
+    const idVal = data.trackingId || data.trackingCode || data.id || data.orderId || ('INV-' + Math.floor(1000 + Math.random() * 9000));
+
+    sheet.getRange(nextRow, 1).setValue(String(dateVal));
+    sheet.getRange(nextRow, COL.address).setValue(String(addressVal));
+    sheet.getRange(nextRow, COL.phone).setValue(String(phoneVal));
+    sheet.getRange(nextRow, COL.cod).setValue(Number(codVal) || 0);
+    sheet.getRange(nextRow, COL.customerName).setValue(String(nameVal));
+    sheet.getRange(nextRow, COL.selectedProduct).setValue(String(variantVal));
+    sheet.getRange(nextRow, COL.source).setValue(String(sourceVal));
+    sheet.getRange(nextRow, COL.orderStatus).setValue(String(statusVal));
+    sheet.getRange(nextRow, COL.courierId).setValue(String(idVal));
+    sheet.getRange(nextRow, COL.courierAction).setValue(String(actionVal));
+    sheet.getRange(nextRow, COL.quantity).setValue(Number(qtyVal) || 1);
+
+    return responseJson_({
+      success: true,
+      message: "New order row appended via JSON",
+      row_number: nextRow,
+      action: "new_order",
+      order_id: String(idVal)
+    });
+  }
+
   let rowNumber = parseInt(data.row_number || data.row || data.rowIndex, 10);
 
   if (!rowNumber || isNaN(rowNumber) || rowNumber < 2) {
@@ -2898,6 +2940,202 @@ export const updateSheet3Entry = async (
 /**
  * Append a new row to Sheet 3 (Date, Product Name, Source, Stock In, Stock Out, Current Stock, Current price)
  */
+/**
+ * Send stock entry as JSON to Google Apps Script / Webhook
+ * Sends clean JSON payload with action: "stock_entry"
+ */
+export const sendStockEntryViaAppsScript = async (
+  entry: {
+    date: string;
+    productName: string;
+    source: string;
+    stockIn: number | '';
+    stockOut: number | '';
+    currentStock: number;
+    currentPrice: number | '';
+  },
+  scriptUrl: string = getAppsScriptUrl()
+) => {
+  const WEB_APP_URL = scriptUrl || getAppsScriptUrl();
+  const inVal = entry.stockIn !== '' && entry.stockIn !== undefined && !isNaN(Number(entry.stockIn)) ? Number(entry.stockIn) : '';
+  const outVal = entry.stockOut !== '' && entry.stockOut !== undefined && !isNaN(Number(entry.stockOut)) ? Number(entry.stockOut) : '';
+  const curStockVal = !isNaN(Number(entry.currentStock)) ? Number(entry.currentStock) : 0;
+  const priceVal = entry.currentPrice !== '' && entry.currentPrice !== undefined && !isNaN(Number(entry.currentPrice)) ? Number(entry.currentPrice) : '';
+
+  const jsonPayload = {
+    action: 'stock_entry',
+    action_type: 'stock_entry',
+    sheetName: 'Sheet3',
+    tabName: 'Sheet3',
+    date: String(entry.date || '').trim(),
+    productName: String(entry.productName || '').trim(),
+    product: String(entry.productName || '').trim(),
+    source: String(entry.source || 'Stock').trim(),
+    stockIn: inVal,
+    stockOut: outVal,
+    currentStock: curStockVal,
+    currentPrice: priceVal,
+    price: priceVal,
+  };
+
+  const jsonString = JSON.stringify(jsonPayload);
+  console.log('[Webhook POST] stock_entry JSON payload:', jsonString);
+
+  // Send POST with text/plain (avoids CORS preflight)
+  try {
+    const res = await fetch(WEB_APP_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: jsonString,
+    });
+    if (res.ok) {
+      const data = await res.json().catch(() => ({ success: true, payload: jsonPayload }));
+      return data;
+    }
+  } catch (err) {
+    console.warn('[Webhook POST] stock_entry POST attempt with no-cors fallback:', err);
+    try {
+      await fetch(WEB_APP_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: jsonString,
+        mode: 'no-cors',
+      });
+    } catch (e2) {
+      console.warn('[Webhook POST] no-cors fallback error:', e2);
+    }
+  }
+
+  // Also trigger GET fallback for Apps Scripts that handle doGet
+  try {
+    const getUrl = new URL(WEB_APP_URL);
+    getUrl.searchParams.set('action', 'stock_entry');
+    getUrl.searchParams.set('sheetName', 'Sheet3');
+    getUrl.searchParams.set('date', entry.date);
+    getUrl.searchParams.set('productName', entry.productName);
+    getUrl.searchParams.set('source', entry.source);
+    if (inVal !== '') getUrl.searchParams.set('stockIn', String(inVal));
+    if (outVal !== '') getUrl.searchParams.set('stockOut', String(outVal));
+    getUrl.searchParams.set('currentStock', String(curStockVal));
+    if (priceVal !== '') getUrl.searchParams.set('currentPrice', String(priceVal));
+    fetch(getUrl.toString(), { mode: 'no-cors', cache: 'no-cache' }).catch(() => {});
+  } catch (err) {
+    // ignore GET forming error
+  }
+
+  return { success: true, payload: jsonPayload };
+};
+
+/**
+ * Send new order as JSON payload to Apps Script Webhook
+ * Sends standard JSON structure with action: "new_order"
+ */
+export const sendNewOrderViaAppsScript = async (
+  order: Order,
+  scriptUrl: string = getAppsScriptUrl()
+) => {
+  const WEB_APP_URL = scriptUrl || getAppsScriptUrl();
+  const dateVal = String(order.date || order.rawDate || '').trim();
+  const addressVal = String(order.customerAddress || '').trim();
+  const phoneVal = String(order.customerPhone || '').trim();
+  const nameVal = String(order.customerName || '').trim();
+  const priceVal = Number(order.amount ?? order.total ?? 599) || 0;
+  const quantityVal = Number(order.quantity) || 1;
+  const productSelectVal = String(order.variant || order.product || 'Rose 599tk').trim();
+  const sourceVal = String(order.source || 'Website').trim();
+  const statusVal = String(order.status || 'Pending').trim();
+  const columnMVal = String(order.steadfastStatus || 'No Sellect').trim();
+  const idVal = String(order.id || '').trim();
+  const trackingIdVal = String(order.trackingCode || order.id || '').trim();
+
+  const jsonPayload = {
+    action: 'new_order',
+    action_type: 'new_order',
+    id: idVal,
+    orderId: idVal,
+    date: dateVal,
+    name: nameVal,
+    customerName: nameVal,
+    number: phoneVal,
+    phone: phoneVal,
+    customerPhone: phoneVal,
+    address: addressVal,
+    customerAddress: addressVal,
+    price: priceVal,
+    amount: priceVal,
+    total: priceVal,
+    quantity: quantityVal,
+    qty: quantityVal,
+    productSelect: productSelectVal,
+    variant: productSelectVal,
+    product: productSelectVal,
+    orderSource: sourceVal,
+    source: sourceVal,
+    orderStatus: statusVal,
+    status: statusVal,
+    columnMValue: columnMVal,
+    courierAction: columnMVal,
+    trackingId: trackingIdVal,
+    trackingCode: trackingIdVal,
+  };
+
+  const jsonString = JSON.stringify(jsonPayload);
+  console.log('[Webhook POST] new_order JSON payload:', jsonString);
+
+  // Send POST with text/plain (avoids CORS preflight)
+  try {
+    const res = await fetch(WEB_APP_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: jsonString,
+    });
+    if (res.ok) {
+      const data = await res.json().catch(() => ({ success: true, payload: jsonPayload }));
+      return data;
+    }
+  } catch (err) {
+    console.warn('[Webhook POST] new_order attempt with no-cors fallback:', err);
+    try {
+      await fetch(WEB_APP_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: jsonString,
+        mode: 'no-cors',
+      });
+    } catch (e2) {
+      console.warn('[Webhook POST] no-cors fallback error:', e2);
+    }
+  }
+
+  // Also trigger GET fallback for Apps Scripts that handle doGet
+  try {
+    const getUrl = new URL(WEB_APP_URL);
+    getUrl.searchParams.set('action', 'new_order');
+    if (idVal) getUrl.searchParams.set('id', idVal);
+    if (dateVal) getUrl.searchParams.set('date', dateVal);
+    if (nameVal) getUrl.searchParams.set('name', nameVal);
+    if (phoneVal) getUrl.searchParams.set('phone', phoneVal);
+    if (addressVal) getUrl.searchParams.set('address', addressVal);
+    getUrl.searchParams.set('price', String(priceVal));
+    getUrl.searchParams.set('quantity', String(quantityVal));
+    getUrl.searchParams.set('productSelect', productSelectVal);
+    getUrl.searchParams.set('orderSource', sourceVal);
+    getUrl.searchParams.set('orderStatus', statusVal);
+    getUrl.searchParams.set('columnMValue', columnMVal);
+    if (trackingIdVal) getUrl.searchParams.set('trackingId', trackingIdVal);
+    fetch(getUrl.toString(), { mode: 'no-cors', cache: 'no-cache' }).catch(() => {});
+  } catch (err) {
+    // ignore GET forming error
+  }
+
+  return { success: true, payload: jsonPayload };
+};
+
+/**
+ * Append a row to Sheet 3 (Stock Log)
+ * 1. Sends stock_entry JSON to Apps Script Webhook
+ * 2. If OAuth token available, also appends directly via Sheets API
+ */
 export const appendSheet3Entry = async (
   spreadsheetId: string,
   accessToken: string | null | undefined,
@@ -2918,10 +3156,14 @@ export const appendSheet3Entry = async (
   const curStockVal = !isNaN(Number(entry.currentStock)) ? Number(entry.currentStock) : 0;
   const priceVal = entry.currentPrice !== '' && entry.currentPrice !== undefined && !isNaN(Number(entry.currentPrice)) ? Number(entry.currentPrice) : '';
 
+  // 1. Always dispatch JSON stock entry to Webhook / Apps Script
+  const appsScriptPromise = sendStockEntryViaAppsScript(entry);
+
+  // 2. If OAuth accessToken available, also write directly to Sheet3
   if (accessToken) {
     try {
       const appendRange = `'${targetTab}'!A7:G:append`;
-      const res = await fetch(
+      await fetch(
         `${SHEETS_API_BASE}/${cleanId}/values/${encodeURIComponent(appendRange)}?valueInputOption=USER_ENTERED`,
         {
           method: 'POST',
@@ -2934,28 +3176,12 @@ export const appendSheet3Entry = async (
           }),
         }
       );
-      if (res.ok) {
-        return { success: true };
-      }
     } catch (err) {
-      console.warn('Direct Google Sheet API append error, falling back to Apps Script:', err);
+      console.warn('Direct Google Sheet API append error, relying on Apps Script JSON:', err);
     }
   }
 
-  return updateOrderViaAppsScript({
-    action: 'append_sheet3_entry',
-    sheetName: 'Sheet3',
-    tabName: 'Sheet3',
-    date: entry.date,
-    productName: entry.productName,
-    product: entry.productName,
-    source: entry.source,
-    stockIn: inVal,
-    stockOut: outVal,
-    currentStock: curStockVal,
-    currentPrice: priceVal,
-    price: priceVal,
-  });
+  return await appsScriptPromise;
 };
 
 /**

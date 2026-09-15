@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Edit3, Calendar, Send, Loader2 } from 'lucide-react';
+import { X, Edit3, Calendar, Send, Loader2, Code2, Check } from 'lucide-react';
 import { Order, OrderStatus } from '../types';
 
 interface NewOrderModalProps {
@@ -74,7 +74,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
   const [quantity, setQuantity] = useState<number>(1);
   const [variant, setVariant] = useState('Rose 599tk');
   const [source, setSource] = useState('Website');
-  const [status, setStatus] = useState<OrderStatus>('Pending');
+  const [status, setStatus] = useState<OrderStatus>('Complete');
 
   // Auto-populate real-time date/time and invoice ID when modal opens
   useEffect(() => {
@@ -88,7 +88,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
       setQuantity(1);
       setVariant('Rose 599tk');
       setSource('Website');
-      setStatus('Pending');
+      setStatus('Complete');
     }
   }, [isOpen]);
 
@@ -314,29 +314,65 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
             </select>
           </div>
 
+          {/* Live JSON Payload Preview */}
+          <div className="bg-[#0b0e16] border border-[#1e2538] rounded-xl p-3 space-y-1.5 mt-2">
+            <div className="flex items-center justify-between text-[11px] font-mono">
+              <span className="flex items-center gap-1.5 text-pink-400 font-semibold">
+                <Code2 className="w-3.5 h-3.5" />
+                <span>New Order JSON (Payload)</span>
+              </span>
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-pink-500/10 text-pink-300 border border-pink-500/20 font-mono">
+                action: &quot;new_order&quot;
+              </span>
+            </div>
+            <pre className="text-[10px] font-mono text-emerald-300/90 bg-[#07090e] p-2 rounded-lg overflow-x-auto border border-[#151b2a] leading-tight select-all max-h-36">
+              {JSON.stringify(
+                {
+                  action: 'new_order',
+                  id: invoiceId || 'INV-0000',
+                  date: orderDateTime.trim() || getRealTimeSheetDate(),
+                  name: customerName.trim() || '(গ্রাহকের নাম)',
+                  number: customerPhone.trim() || '01700000000',
+                  address: customerAddress.trim() || 'ঢাকা',
+                  price: Number(price) || 599,
+                  quantity: Number(quantity) || 1,
+                  productSelect: variant,
+                  orderSource: source,
+                  orderStatus: status,
+                  columnMValue: 'No Sellect',
+                },
+                null,
+                2
+              )}
+            </pre>
+            <p className="text-[10px] text-gray-400">
+              সব লিখে কমপ্লিট বাটনে চাপলে স্বয়ংক্রিয়ভাবে এই JSON অবজেক্টটি <span className="text-pink-300 font-mono font-bold">new_order</span> হিসেবে গুগল শিট / ওয়েবহুকে সেন্ড হবে।
+            </p>
+          </div>
+
           {/* Footer Action Buttons */}
           <div className="flex items-center justify-between gap-2 pt-3 border-t border-[#232636]">
             <button
               type="button"
               onClick={onClose}
-              className="px-3.5 sm:px-4 py-2 rounded-lg bg-[#202434] hover:bg-[#2a3044] text-gray-300 text-xs font-semibold transition-colors cursor-pointer active:scale-95"
+              className="px-3.5 sm:px-4 py-2.5 rounded-xl bg-[#202434] hover:bg-[#2a3044] text-gray-300 text-xs font-semibold transition-colors cursor-pointer active:scale-95"
             >
               বাতিল
             </button>
             <button
               type="submit"
-              disabled={isSubmitting}
-              className="px-4 sm:px-5 py-2 rounded-lg bg-gradient-to-r from-pink-600 via-rose-600 to-pink-500 hover:from-pink-500 hover:to-rose-500 text-white text-xs font-bold shadow-lg shadow-pink-600/30 flex items-center gap-1.5 sm:gap-2 transition-all cursor-pointer disabled:opacity-50 active:scale-95 ml-auto"
+              disabled={isSubmitting || !customerName.trim()}
+              className="px-4 sm:px-5 py-2.5 rounded-xl bg-gradient-to-r from-pink-600 via-rose-600 to-pink-500 hover:from-pink-500 hover:to-rose-500 text-white text-xs font-bold shadow-lg shadow-pink-600/30 flex items-center gap-1.5 sm:gap-2 transition-all cursor-pointer disabled:opacity-50 active:scale-95 ml-auto"
             >
               {isSubmitting ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>সেভ হচ্ছে...</span>
+                  <span>নতুন অর্ডার JSON পাঠানো হচ্ছে...</span>
                 </>
               ) : (
                 <>
                   <Send className="w-4 h-4" />
-                  <span>শিটে সেভ করুন</span>
+                  <span>কমপ্লিট ও নতুন অর্ডার JSON সেন্ড করুন</span>
                 </>
               )}
             </button>

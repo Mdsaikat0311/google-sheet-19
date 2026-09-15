@@ -44,6 +44,7 @@ import {
   updateOrderCardViaAppsScript,
   buildOrderCardPayload,
   sendSteadfastOrdersViaAppsScript,
+  sendNewOrderViaAppsScript,
 } from './services/sheets';
 import { Sidebar, MainTabType } from './components/Sidebar';
 import { DashboardHome } from './components/DashboardHome';
@@ -334,7 +335,7 @@ export default function App() {
 
   // Handler to append a new Sheet 3 row entry
   const handleAddSheet3Entry = async (newEntry: Omit<Sheet3ProductEntry, 'rowIndex' | 'id'>) => {
-    showToast('শিট ৩-এ নতুন এন্ট্রি যোগ করা হচ্ছে...', 'success');
+    showToast('স্টক এন্ট্রি JSON পাঠানো হচ্ছে...', 'success');
     const nextRow = sheet3Entries.length > 0
       ? Math.max(...sheet3Entries.map((e) => e.rowIndex)) + 1
       : 19;
@@ -348,11 +349,11 @@ export default function App() {
 
     try {
       await appendSheet3Entry(spreadsheetId, accessToken, newEntry);
-      showToast('শিট ৩-এ নতুন এন্ট্রি সফলভাবে যোগ হয়েছে!', 'success');
+      showToast('স্টক এন্ট্রি JSON সফলভাবে সেভ ও সেন্ড হয়েছে!', 'success');
       setTimeout(() => loadSheet3StockLive(spreadsheetId), 1200);
     } catch (err) {
       console.error('Failed to append Sheet3 entry:', err);
-      showToast('শিট ৩ এন্ট্রি যোগ করতে সমস্যা হয়েছে', 'error');
+      showToast('স্টক এন্ট্রি যোগ করতে সমস্যা হয়েছে', 'error');
     }
   };
 
@@ -975,6 +976,7 @@ export default function App() {
   // Create New Order
   const handleAddNewOrder = async (newOrder: Order) => {
     setIsSubmittingOrder(true);
+    showToast(`নতুন অর্ডার ${newOrder.id} তৈরি ও JSON সেন্ড হচ্ছে...`);
     try {
       // 1. Update local state
       const orderWithRow: Order = {
@@ -982,8 +984,6 @@ export default function App() {
         rowIndex: orders.length + 3,
       };
       setOrders((prev) => [orderWithRow, ...prev]);
-
-      showToast(`নতুন অর্ডার ${newOrder.id} সফলভাবে তৈরি হয়েছে!`);
 
       // Deduct stock for the ordered product if match found
       const orderedQty = newOrder.quantity || 1;
@@ -1017,14 +1017,23 @@ export default function App() {
         })
       );
 
-      // 2. Append to Google Sheet if token exists
+      // 2. Always dispatch new order JSON to Apps Script Webhook
+      const appsScriptPromise = sendNewOrderViaAppsScript(newOrder);
+
+      // 3. Append to Google Sheet if token exists
       if (accessToken) {
-        await appendSheetOrder(spreadsheetId, accessToken, newOrder, orderSheetTab);
-        showToast('অর্ডারটি সরাসরি গুগল শিটে যুক্ত করা হয়েছে!');
+        try {
+          await appendSheetOrder(spreadsheetId, accessToken, newOrder, orderSheetTab);
+        } catch (sheetErr) {
+          console.warn('Direct Google Sheet API append error, relying on Apps Script JSON:', sheetErr);
+        }
       }
+
+      await appsScriptPromise;
+      showToast(`নতুন অর্ডার ${newOrder.id} JSON আকারে সফলভাবে সেন্ড হয়েছে!`);
     } catch (err: any) {
       console.error('Error creating new order:', err);
-      showToast(`শিটে অর্ডার যোগ করতে সমস্যা: ${err.message}`, 'error');
+      showToast(`অর্ডার তৈরিতে সমস্যা: ${err.message}`, 'error');
     } finally {
       setIsSubmittingOrder(false);
     }

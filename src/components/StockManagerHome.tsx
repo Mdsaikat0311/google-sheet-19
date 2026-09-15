@@ -21,6 +21,8 @@ import {
   Search,
   Filter,
   Lock,
+  Code2,
+  Send,
 } from 'lucide-react';
 import { Product, Order, StockMovementLog, Sheet3ProductEntry } from '../types';
 import { groupItemsByDate } from '../utils/dateGrouping';
@@ -316,16 +318,21 @@ export const StockManagerHome: React.FC<StockManagerHomeProps> = ({
       const stockToUse =
         matched?.stock !== undefined ? matched.stock : Number(sheet3NewCurrentStock) || 0;
 
+      const payload = {
+        action: 'stock_entry',
+        date: dateStr,
+        productName: sheet3NewProductName.trim(),
+        source: sheet3NewSource.trim() || 'Stock',
+        stockIn: (sheet3NewStockIn !== '' ? Number(sheet3NewStockIn) : '') as number | '',
+        stockOut: (sheet3NewStockOut !== '' ? Number(sheet3NewStockOut) : '') as number | '',
+        currentStock: stockToUse,
+        currentPrice: (sheet3NewCurrentPrice !== '' ? Number(sheet3NewCurrentPrice) : '') as number | '',
+      };
+
+      console.log('[Stock Entry] Sending JSON payload:', JSON.stringify(payload));
+
       if (onAddSheet3Entry) {
-        await onAddSheet3Entry({
-          date: dateStr,
-          productName: sheet3NewProductName.trim(),
-          source: sheet3NewSource.trim() || 'Stock',
-          stockIn: sheet3NewStockIn !== '' ? Number(sheet3NewStockIn) : '',
-          stockOut: sheet3NewStockOut !== '' ? Number(sheet3NewStockOut) : '',
-          currentStock: stockToUse,
-          currentPrice: sheet3NewCurrentPrice !== '' ? Number(sheet3NewCurrentPrice) : '',
-        });
+        await onAddSheet3Entry(payload);
       }
       setIsNewStockOpen(false);
     } catch (err) {
@@ -428,8 +435,26 @@ export const StockManagerHome: React.FC<StockManagerHomeProps> = ({
                 )}
               </div>
 
-              {/* Action Controls: Live Refresh + Reset Button */}
+              {/* Action Controls: New Entry + Live Refresh + Reset Button */}
               <div className="flex items-center gap-2 shrink-0">
+                {/* New Entry Button */}
+                <button
+                  type="button"
+                  id="stock-new-entry-btn"
+                  onClick={() => {
+                    const now = new Date();
+                    setSheet3NewDate(
+                      `${now.getMonth() + 1}/${now.getDate()}/${now.getFullYear()} ${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`
+                    );
+                    setIsNewStockOpen(true);
+                  }}
+                  className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-pink-600 via-rose-600 to-pink-500 hover:from-pink-500 hover:to-rose-500 text-white flex items-center gap-1.5 text-xs font-bold shadow-md shadow-pink-600/30 cursor-pointer transition-all active:scale-95 shrink-0"
+                  title="নতুন স্টক এন্ট্রি যোগ করুন (New Stock Entry)"
+                >
+                  <PlusCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                  <span>+ New Entry</span>
+                </button>
+
                 {/* Live Refresh Button */}
                 {onRefreshSheet3 && (
                   <button
@@ -471,17 +496,34 @@ export const StockManagerHome: React.FC<StockManagerHomeProps> = ({
                 <p className="text-xs text-gray-500 mt-1">
                   অন্য কোনো প্রোডাক্ট সিলেক্ট করুন অথবা ফিল্টার রিসেট করুন।
                 </p>
-                <button
-                  onClick={() => {
-                    setProductFilter('all');
-                    setSourceFilter('all');
-                    setSearchSheet3Query('');
-                  }}
-                  className="mt-3 px-3 py-1.5 rounded-lg bg-pink-600 hover:bg-pink-500 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
-                >
-                  <RotateCcw className="w-3 h-3" />
-                  <span>সব ফিল্টার রিসেট করুন</span>
-                </button>
+                <div className="mt-3 flex items-center justify-center gap-2 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const now = new Date();
+                      setSheet3NewDate(
+                        `${now.getMonth() + 1}/${now.getDate()}/${now.getFullYear()} ${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`
+                      );
+                      setIsNewStockOpen(true);
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-500 hover:to-rose-500 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-all cursor-pointer active:scale-95 shadow-sm"
+                  >
+                    <PlusCircle className="w-3.5 h-3.5" />
+                    <span>+ New Entry</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setProductFilter('all');
+                      setSourceFilter('all');
+                      setSearchSheet3Query('');
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-[#1a2030] hover:bg-[#222a40] text-gray-300 border border-[#2b3550] text-xs font-semibold inline-flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+                  >
+                    <RotateCcw className="w-3 h-3 text-pink-400" />
+                    <span>সব ফিল্টার রিসেট করুন</span>
+                  </button>
+                </div>
               </div>
             ) : hasSheet3Data ? (
               groupedSheet3Entries.map((group) => (
@@ -1242,6 +1284,49 @@ export const StockManagerHome: React.FC<StockManagerHomeProps> = ({
                     />
                   </div>
                 </div>
+
+                {/* JSON Stock Entry Live Payload Preview */}
+                <div className="bg-[#0b0e16] border border-[#1e2538] rounded-xl p-2.5 space-y-1 mt-2">
+                  <div className="flex items-center justify-between text-[11px] font-mono">
+                    <span className="flex items-center gap-1 text-pink-400 font-semibold">
+                      <Code2 className="w-3.5 h-3.5" />
+                      <span>Stock Entry JSON (Payload)</span>
+                    </span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-pink-500/10 text-pink-300 border border-pink-500/20 font-mono">
+                      action: &quot;stock_entry&quot;
+                    </span>
+                  </div>
+                  <pre className="text-[10px] font-mono text-emerald-300/90 bg-[#07090e] p-2 rounded-lg overflow-x-auto border border-[#151b2a] leading-tight select-all">
+                    {JSON.stringify(
+                      {
+                        action: 'stock_entry',
+                        date:
+                          sheet3NewDate.trim() ||
+                          (() => {
+                            const d = new Date();
+                            return `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()} ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
+                          })(),
+                        productName: sheet3NewProductName || '(সিলেক্ট করুন)',
+                        source: sheet3NewSource || 'Stock',
+                        stockIn: sheet3NewStockIn !== '' ? Number(sheet3NewStockIn) : 0,
+                        stockOut: sheet3NewStockOut !== '' ? Number(sheet3NewStockOut) : 0,
+                        currentStock:
+                          products.find(
+                            (p) =>
+                              p.name.toLowerCase().includes(sheet3NewProductName.toLowerCase()) ||
+                              sheet3NewProductName.toLowerCase().includes(p.name.toLowerCase())
+                          )?.stock ?? (Number(sheet3NewCurrentStock) || 0),
+                        currentPrice:
+                          sheet3NewCurrentPrice !== '' ? Number(sheet3NewCurrentPrice) : 0,
+                      },
+                      null,
+                      2
+                    )}
+                  </pre>
+                  <p className="text-[10px] text-gray-400">
+                    সেভ বাটনে চাপলে স্বয়ংক্রিয়ভাবে এই JSON অবজেক্টটি <span className="text-pink-300 font-mono font-bold">stock_entry</span> হিসেবে পাঠানো হবে।
+                  </p>
+                </div>
               </div>
 
             {/* Action Buttons */}
@@ -1257,18 +1342,18 @@ export const StockManagerHome: React.FC<StockManagerHomeProps> = ({
               <button
                 type="button"
                 onClick={handleSaveDirectSheet3Entry}
-                disabled={isAddingSheet3Entry}
-                className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-500 hover:to-rose-500 text-white text-xs font-bold shadow-md shadow-pink-600/30 flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                disabled={isAddingSheet3Entry || !sheet3NewProductName.trim()}
+                className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-pink-600 via-rose-600 to-pink-600 hover:from-pink-500 hover:to-rose-500 text-white text-xs font-bold shadow-md shadow-pink-600/30 flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 transition-all active:scale-[0.98]"
               >
                 {isAddingSheet3Entry ? (
                   <>
                     <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    <span>শিট ৩-এ যোগ হচ্ছে...</span>
+                    <span>JSON পাঠানো হচ্ছে...</span>
                   </>
                 ) : (
                   <>
-                    <Check className="w-3.5 h-3.5" />
-                    <span>শিট ৩-এ রো যোগ করুন</span>
+                    <Send className="w-3.5 h-3.5" />
+                    <span>সেভ ও JSON সেন্ড করুন</span>
                   </>
                 )}
               </button>

@@ -389,7 +389,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         totalDelivery,
         deliveryRate: totalConfirm > 0 ? `${((totalDelivery / totalConfirm) * 100).toFixed(1)}%` : '0%',
         totalPending,
+        pendingRate: totalLead > 0 ? `${((totalPending / totalLead) * 100).toFixed(1)}%` : '0%',
         totalPartial,
+        partialRate: totalLead > 0 ? `${((totalPartial / totalLead) * 100).toFixed(1)}%` : '0%',
         totalQuantity,
         totalCancel,
         cancelRate: totalLead > 0 ? `${((totalCancel / totalLead) * 100).toFixed(1)}%` : '0%',
@@ -411,7 +413,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             totalDelivery: p.overall.delivery,
             deliveryRate: p.overall.deliveryRate,
             totalPending: p.overall.pending,
+            pendingRate: p.overall.pendingRate || (p.overall.lead > 0 ? `${((p.overall.pending / p.overall.lead) * 100).toFixed(1)}%` : '0%'),
             totalPartial: p.overall.partial,
+            partialRate: p.overall.partialRate || (p.overall.lead > 0 ? `${((p.overall.partial / p.overall.lead) * 100).toFixed(1)}%` : '0%'),
             totalQuantity: p.overall.quantity,
             totalCancel: p.overall.cancel,
             cancelRate: p.overall.cancelRate,
@@ -436,7 +440,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         totalDelivery: delivery,
         deliveryRate: confirm > 0 ? `${((delivery / confirm) * 100).toFixed(1)}%` : '0%',
         totalPending: pending,
+        pendingRate: lead > 0 ? `${((pending / lead) * 100).toFixed(1)}%` : '0%',
         totalPartial: partial,
+        partialRate: lead > 0 ? `${((partial / lead) * 100).toFixed(1)}%` : '0%',
         totalQuantity: quantity,
         totalCancel: cancel,
         cancelRate: confirm > 0 ? `${((cancel / confirm) * 100).toFixed(1)}%` : '0%',
@@ -461,7 +467,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       totalDelivery,
       deliveryRate: totalConfirm > 0 ? `${((totalDelivery / totalConfirm) * 100).toFixed(1)}%` : '0%',
       totalPending,
+      pendingRate: totalLead > 0 ? `${((totalPending / totalLead) * 100).toFixed(1)}%` : '0%',
       totalPartial,
+      partialRate: totalLead > 0 ? `${((totalPartial / totalLead) * 100).toFixed(1)}%` : '0%',
       totalQuantity,
       totalCancel,
       cancelRate: totalLead > 0 ? `${((totalCancel / totalLead) * 100).toFixed(1)}%` : '0%',
@@ -1078,12 +1086,12 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
           </div>
         </div>
 
-      {/* 4 Main KPI Cards: সব অর্ডারের মূল ডাটা বক্স (All Orders Summary Box for Selected Date) */}
+      {/* 6 Main KPI Cards: Confirm | Delivery | Pending | Partial | Quantity | Cancel */}
       <div>
         <div className="flex items-center justify-between mb-2.5">
           <div className="flex items-center gap-2">
             <span className="text-xs font-bold text-gray-300 uppercase tracking-wide">
-              📊 সব অর্ডারের ডাটা বক্স ({getDateFilterLabel()})
+              📊 পারফরম্যান্স সামারি ডাটা বক্স ({getDateFilterLabel()})
             </span>
             {dateFilter !== 'all' && (
               <span className="text-[10px] px-2 py-0.5 rounded-full bg-pink-500/20 text-pink-300 border border-pink-500/30">
@@ -1101,91 +1109,129 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
           )}
         </div>
 
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4">
-          {/* Card 1: মোট অর্ডার লিড */}
-          <div className="bg-[#12151f] border border-[#1e2436] rounded-2xl p-4 sm:p-5 relative overflow-hidden group hover:border-purple-500/40 transition-all shadow-md">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-3">
+          {/* 1. Confirm */}
+          <div className="bg-[#12151f] border border-[#1e2436] rounded-2xl p-3 sm:p-4 relative overflow-hidden group hover:border-pink-500/40 transition-all shadow-md">
             <div className="flex items-center justify-between text-xs font-medium text-gray-400">
-              <span className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-purple-400 shrink-0" />
-                মোট লিড এসেছে
-              </span>
-              <div className="w-8 h-8 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400">
-                <ShoppingBag className="w-4 h-4" />
-              </div>
-            </div>
-            <div className="mt-2.5">
-              <div className="text-2xl sm:text-3xl font-black text-white tracking-tight">
-                {aggregatedStats.totalLead} <span className="text-sm font-semibold text-gray-400">টি</span>
-              </div>
-              <div className="text-[11px] text-gray-400 mt-1 flex items-center justify-between">
-                <span>কনফার্ম: <strong className="text-purple-300">{aggregatedStats.totalConfirm}</strong> টি</span>
-                <span>পেন্ডিং: <strong className="text-amber-400">{aggregatedStats.totalPending}</strong></span>
-              </div>
-            </div>
-          </div>
-
-          {/* Card 2: কনফার্মেশন সংখ্যা ও রেট */}
-          <div className="bg-[#12151f] border border-[#1e2436] rounded-2xl p-4 sm:p-5 relative overflow-hidden group hover:border-pink-500/40 transition-all shadow-md">
-            <div className="flex items-center justify-between text-xs font-medium text-gray-400">
-              <span className="flex items-center gap-1.5">
+              <span className="flex items-center gap-1.5 truncate">
                 <span className="w-2 h-2 rounded-full bg-pink-500 shrink-0" />
-                কনফার্ম হয়েছে
+                Confirm
               </span>
-              <div className="w-8 h-8 rounded-xl bg-pink-500/10 border border-pink-500/20 flex items-center justify-center text-pink-400">
-                <CheckCircle2 className="w-4 h-4" />
+              <div className="w-7 h-7 rounded-lg bg-pink-500/10 border border-pink-500/20 flex items-center justify-center text-pink-400 shrink-0">
+                <CheckCircle2 className="w-3.5 h-3.5" />
               </div>
             </div>
-            <div className="mt-2.5">
-              <div className="text-2xl sm:text-3xl font-black text-pink-400 tracking-tight">
-                {aggregatedStats.totalConfirm} <span className="text-sm font-semibold text-gray-400">টি</span>
+            <div className="mt-2">
+              <div className="text-xl sm:text-2xl font-black text-pink-400 tracking-tight font-mono">
+                {aggregatedStats.totalConfirm} <span className="text-xs font-semibold text-gray-400">টি</span>
               </div>
-              <div className="text-[11px] text-gray-400 mt-1 flex items-center justify-between">
-                <span>কনফার্ম রেট: <strong className="text-pink-300">{aggregatedStats.confirmRate}</strong></span>
-                <span>ডেলিভারি: <strong className="text-emerald-400">{aggregatedStats.totalDelivery}</strong></span>
+              <div className="text-[11px] text-gray-400 mt-1 truncate">
+                রেট: <strong className="text-pink-300">{cleanRate(aggregatedStats.confirmRate)}</strong>
               </div>
             </div>
           </div>
 
-          {/* Card 3: ডেলিভারি সংখ্যা ও রেট */}
-          <div className="bg-[#12151f] border border-[#1e2436] rounded-2xl p-4 sm:p-5 relative overflow-hidden group hover:border-emerald-500/40 transition-all shadow-md">
+          {/* 2. Delivery */}
+          <div className="bg-[#12151f] border border-[#1e2436] rounded-2xl p-3 sm:p-4 relative overflow-hidden group hover:border-emerald-500/40 transition-all shadow-md">
             <div className="flex items-center justify-between text-xs font-medium text-gray-400">
-              <span className="flex items-center gap-1.5">
+              <span className="flex items-center gap-1.5 truncate">
                 <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />
-                ডেলিভারি সম্পন্ন
+                Delivery
               </span>
-              <div className="w-8 h-8 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
-                <Truck className="w-4 h-4" />
+              <div className="w-7 h-7 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">
+                <Truck className="w-3.5 h-3.5" />
               </div>
             </div>
-            <div className="mt-2.5">
-              <div className="text-2xl sm:text-3xl font-black text-emerald-400 tracking-tight">
-                {aggregatedStats.totalDelivery} <span className="text-sm font-semibold text-gray-400">টি</span>
+            <div className="mt-2">
+              <div className="text-xl sm:text-2xl font-black text-emerald-400 tracking-tight font-mono">
+                {aggregatedStats.totalDelivery} <span className="text-xs font-semibold text-gray-400">টি</span>
               </div>
-              <div className="text-[11px] text-gray-400 mt-1 flex items-center justify-between">
-                <span>সাকসেস রেট: <strong className="text-emerald-300">{aggregatedStats.deliveryRate}</strong></span>
-                <span>পার্শিয়াল: <strong className="text-amber-400">{aggregatedStats.totalPartial}</strong></span>
+              <div className="text-[11px] text-gray-400 mt-1 truncate">
+                সাকসেস: <strong className="text-emerald-300">{cleanRate(aggregatedStats.deliveryRate)}</strong>
               </div>
             </div>
           </div>
 
-          {/* Card 4: কোয়ান্টিটি ও ক্যান্সেল */}
-          <div className="bg-rose-500/10 border border-rose-500/30 rounded-2xl p-4 sm:p-5 relative overflow-hidden group hover:border-rose-400/50 transition-all shadow-md">
-            <div className="flex items-center justify-between text-xs font-medium text-rose-300">
-              <span className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-rose-400 shrink-0" />
-                ক্যান্সেল ও কোয়ান্টিটি
+          {/* 3. Pending */}
+          <div className="bg-[#12151f] border border-[#1e2436] rounded-2xl p-3 sm:p-4 relative overflow-hidden group hover:border-amber-500/40 transition-all shadow-md">
+            <div className="flex items-center justify-between text-xs font-medium text-gray-400">
+              <span className="flex items-center gap-1.5 truncate">
+                <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0" />
+                Pending
               </span>
-              <div className="w-8 h-8 rounded-xl bg-rose-500/20 border border-rose-500/30 flex items-center justify-center text-rose-300">
-                <Ban className="w-4 h-4" />
+              <div className="w-7 h-7 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 shrink-0">
+                <Clock className="w-3.5 h-3.5" />
               </div>
             </div>
-            <div className="mt-2.5">
-              <div className="text-2xl sm:text-3xl font-black text-rose-300 tracking-tight">
-                {aggregatedStats.totalCancel} <span className="text-sm font-semibold text-rose-200">টি</span>
+            <div className="mt-2">
+              <div className="text-xl sm:text-2xl font-black text-amber-400 tracking-tight font-mono">
+                {aggregatedStats.totalPending} <span className="text-xs font-semibold text-gray-400">টি</span>
               </div>
-              <div className="text-[11px] text-gray-300 mt-1 flex items-center justify-between">
-                <span>ক্যান্সেল রেট: <strong className="text-rose-200">{aggregatedStats.cancelRate}</strong></span>
-                <span>কোয়ান্টিটি: <strong className="text-white">{aggregatedStats.totalQuantity}</strong> টি</span>
+              <div className="text-[11px] text-gray-400 mt-1 truncate">
+                পেন্ডিং: <strong className="text-amber-300">{cleanRate(aggregatedStats.pendingRate)}</strong>
+              </div>
+            </div>
+          </div>
+
+          {/* 4. Partial */}
+          <div className="bg-[#12151f] border border-[#1e2436] rounded-2xl p-3 sm:p-4 relative overflow-hidden group hover:border-orange-500/40 transition-all shadow-md">
+            <div className="flex items-center justify-between text-xs font-medium text-gray-400">
+              <span className="flex items-center gap-1.5 truncate">
+                <span className="w-2 h-2 rounded-full bg-orange-400 shrink-0" />
+                Partial
+              </span>
+              <div className="w-7 h-7 rounded-lg bg-orange-500/10 border border-orange-500/20 flex items-center justify-center text-orange-400 shrink-0">
+                <Layers className="w-3.5 h-3.5" />
+              </div>
+            </div>
+            <div className="mt-2">
+              <div className="text-xl sm:text-2xl font-black text-orange-400 tracking-tight font-mono">
+                {aggregatedStats.totalPartial} <span className="text-xs font-semibold text-gray-400">টি</span>
+              </div>
+              <div className="text-[11px] text-gray-400 mt-1 truncate">
+                পার্শিয়াল: <strong className="text-orange-300">{cleanRate(aggregatedStats.partialRate)}</strong>
+              </div>
+            </div>
+          </div>
+
+          {/* 5. Quantity */}
+          <div className="bg-[#12151f] border border-[#1e2436] rounded-2xl p-3 sm:p-4 relative overflow-hidden group hover:border-cyan-500/40 transition-all shadow-md">
+            <div className="flex items-center justify-between text-xs font-medium text-gray-400">
+              <span className="flex items-center gap-1.5 truncate">
+                <span className="w-2 h-2 rounded-full bg-cyan-400 shrink-0" />
+                Quantity
+              </span>
+              <div className="w-7 h-7 rounded-lg bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-300 shrink-0">
+                <Package className="w-3.5 h-3.5" />
+              </div>
+            </div>
+            <div className="mt-2">
+              <div className="text-xl sm:text-2xl font-black text-cyan-300 tracking-tight font-mono">
+                {aggregatedStats.totalQuantity} <span className="text-xs font-semibold text-gray-400">পিস</span>
+              </div>
+              <div className="text-[11px] text-gray-400 mt-1 truncate">
+                আইটেম: <strong className="text-cyan-200">মোট পিস</strong>
+              </div>
+            </div>
+          </div>
+
+          {/* 6. Cancel */}
+          <div className="bg-rose-500/10 border border-rose-500/30 rounded-2xl p-3 sm:p-4 relative overflow-hidden group hover:border-rose-400/50 transition-all shadow-md">
+            <div className="flex items-center justify-between text-xs font-medium text-rose-300">
+              <span className="flex items-center gap-1.5 truncate">
+                <span className="w-2 h-2 rounded-full bg-rose-400 shrink-0" />
+                Cancel
+              </span>
+              <div className="w-7 h-7 rounded-lg bg-rose-500/20 border border-rose-500/30 flex items-center justify-center text-rose-300 shrink-0">
+                <Ban className="w-3.5 h-3.5" />
+              </div>
+            </div>
+            <div className="mt-2">
+              <div className="text-xl sm:text-2xl font-black text-rose-300 tracking-tight font-mono">
+                {aggregatedStats.totalCancel} <span className="text-xs font-semibold text-rose-200">টি</span>
+              </div>
+              <div className="text-[11px] text-gray-300 mt-1 truncate">
+                ক্যান্সেল: <strong className="text-rose-200">{cleanRate(aggregatedStats.cancelRate)}</strong>
               </div>
             </div>
           </div>
@@ -1300,14 +1346,8 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                     )}
                   </div>
 
-                  <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-1.5 sm:gap-2">
-                    {/* 1. Order Lead */}
-                    <div className="bg-[#141824] border border-[#20283c] rounded-lg py-1 px-1.5 text-center flex flex-col justify-center min-h-[42px]">
-                      <span className="text-[10px] text-gray-400 font-medium block truncate">Order Lead</span>
-                      <span className="text-xs sm:text-[13px] font-bold text-white mt-0.5 font-mono">{prodStats.lead}</span>
-                    </div>
-
-                    {/* 2. Confirm */}
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-1.5 sm:gap-2">
+                    {/* 1. Confirm */}
                     <div className="bg-[#141824] border border-[#20283c] rounded-lg py-1 px-1.5 text-center flex flex-col justify-center min-h-[42px]">
                       <span className="text-[10px] text-gray-400 font-medium block truncate">Confirm</span>
                       <span className="text-xs sm:text-[13px] font-bold text-pink-400 mt-0.5 font-mono whitespace-nowrap">
@@ -1315,7 +1355,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                       </span>
                     </div>
 
-                    {/* 3. Delivery */}
+                    {/* 2. Delivery */}
                     <div className="bg-[#141824] border border-[#20283c] rounded-lg py-1 px-1.5 text-center flex flex-col justify-center min-h-[42px]">
                       <span className="text-[10px] text-gray-400 font-medium block truncate">Delivery</span>
                       <span className="text-xs sm:text-[13px] font-bold text-emerald-400 mt-0.5 font-mono whitespace-nowrap">
@@ -1323,7 +1363,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                       </span>
                     </div>
 
-                    {/* 4. Pending */}
+                    {/* 3. Pending */}
                     <div className="bg-[#141824] border border-[#20283c] rounded-lg py-1 px-1.5 text-center flex flex-col justify-center min-h-[42px]">
                       <span className="text-[10px] text-gray-400 font-medium block truncate">Pending</span>
                       <span className="text-xs sm:text-[13px] font-bold text-amber-400 mt-0.5 font-mono whitespace-nowrap">
@@ -1331,7 +1371,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                       </span>
                     </div>
 
-                    {/* 5. Partial */}
+                    {/* 4. Partial */}
                     <div className="bg-[#141824] border border-[#20283c] rounded-lg py-1 px-1.5 text-center flex flex-col justify-center min-h-[42px]">
                       <span className="text-[10px] text-gray-400 font-medium block truncate">Partial</span>
                       <span className="text-xs sm:text-[13px] font-bold text-orange-400 mt-0.5 font-mono whitespace-nowrap">
@@ -1339,13 +1379,13 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                       </span>
                     </div>
 
-                    {/* 6. Quantity */}
+                    {/* 5. Quantity */}
                     <div className="bg-[#141824] border border-[#20283c] rounded-lg py-1 px-1.5 text-center flex flex-col justify-center min-h-[42px]">
                       <span className="text-[10px] text-gray-400 font-medium block truncate">Quantity</span>
                       <span className="text-xs sm:text-[13px] font-bold text-cyan-300 mt-0.5 font-mono">{prodStats.quantity}</span>
                     </div>
 
-                    {/* 7. Cancel */}
+                    {/* 6. Cancel */}
                     <div className="bg-rose-500/20 border border-rose-500/40 rounded-lg py-1 px-1.5 text-center flex flex-col justify-center min-h-[42px]">
                       <span className="text-[10px] text-rose-300 font-medium block truncate">Cancel</span>
                       <span className="text-xs sm:text-[13px] font-bold text-rose-300 mt-0.5 font-mono whitespace-nowrap">
@@ -1400,15 +1440,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                             </span>
                           </div>
 
-                          {/* 7 Sleek Source Metric Boxes */}
-                          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-1.5 sm:gap-2">
-                            {/* 1. Order Lead */}
-                            <div className="bg-[#0b0e16] border border-[#1a2236] rounded-lg py-1 px-1.5 text-center flex flex-col justify-center min-h-[40px]">
-                              <span className="text-[10px] text-gray-400 font-medium block truncate">Order Lead</span>
-                              <span className="text-xs sm:text-[13px] font-bold text-white mt-0.5 font-mono">{src.lead}</span>
-                            </div>
-
-                            {/* 2. Confirm */}
+                          {/* 6 Sleek Source Metric Boxes */}
+                          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-1.5 sm:gap-2">
+                            {/* 1. Confirm */}
                             <div className="bg-[#0b0e16] border border-[#1a2236] rounded-lg py-1 px-1.5 text-center flex flex-col justify-center min-h-[40px]">
                               <span className="text-[10px] text-gray-400 font-medium block truncate">Confirm</span>
                               <span className="text-xs sm:text-[13px] font-bold text-pink-400 mt-0.5 font-mono whitespace-nowrap">
@@ -1416,7 +1450,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                               </span>
                             </div>
 
-                            {/* 3. Delivery */}
+                            {/* 2. Delivery */}
                             <div className="bg-[#0b0e16] border border-[#1a2236] rounded-lg py-1 px-1.5 text-center flex flex-col justify-center min-h-[40px]">
                               <span className="text-[10px] text-gray-400 font-medium block truncate">Delivery</span>
                               <span className="text-xs sm:text-[13px] font-bold text-emerald-400 mt-0.5 font-mono whitespace-nowrap">
@@ -1424,7 +1458,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                               </span>
                             </div>
 
-                            {/* 4. Pending */}
+                            {/* 3. Pending */}
                             <div className="bg-[#0b0e16] border border-[#1a2236] rounded-lg py-1 px-1.5 text-center flex flex-col justify-center min-h-[40px]">
                               <span className="text-[10px] text-gray-400 font-medium block truncate">Pending</span>
                               <span className="text-xs sm:text-[13px] font-bold text-amber-400 mt-0.5 font-mono whitespace-nowrap">
@@ -1432,7 +1466,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                               </span>
                             </div>
 
-                            {/* 5. Partial */}
+                            {/* 4. Partial */}
                             <div className="bg-[#0b0e16] border border-[#1a2236] rounded-lg py-1 px-1.5 text-center flex flex-col justify-center min-h-[40px]">
                               <span className="text-[10px] text-gray-400 font-medium block truncate">Partial</span>
                               <span className="text-xs sm:text-[13px] font-bold text-orange-400 mt-0.5 font-mono whitespace-nowrap">
@@ -1440,13 +1474,13 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                               </span>
                             </div>
 
-                            {/* 6. Quantity */}
+                            {/* 5. Quantity */}
                             <div className="bg-[#0b0e16] border border-[#1a2236] rounded-lg py-1 px-1.5 text-center flex flex-col justify-center min-h-[40px]">
                               <span className="text-[10px] text-gray-400 font-medium block truncate">Quantity</span>
                               <span className="text-xs sm:text-[13px] font-bold text-cyan-300 mt-0.5 font-mono">{src.quantity}</span>
                             </div>
 
-                            {/* 7. Cancel */}
+                            {/* 6. Cancel */}
                             <div className="bg-rose-500/20 border border-rose-500/40 rounded-lg py-1 px-1.5 text-center flex flex-col justify-center min-h-[40px]">
                               <span className="text-[10px] text-rose-300 font-medium block truncate">Cancel</span>
                               <span className="text-xs sm:text-[13px] font-bold text-rose-300 mt-0.5 font-mono whitespace-nowrap">
@@ -1791,17 +1825,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                         </div>
                       </div>
 
-                      {/* কার্ডের ৭টি চিকন ডাটা বক্স (Order Lead | Confirm | Delivery | Pending | Partial | Quantity | Cancel) */}
-                      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-1.5 sm:gap-2">
-                        {/* 1. Order Lead */}
-                        <div className="bg-[#141824] border border-[#20283c] group-hover:border-purple-500/30 rounded-lg py-1 px-1.5 text-center flex flex-col justify-center transition-all min-h-[42px]">
-                          <span className="text-[10px] text-gray-400 font-medium block truncate">Order Lead</span>
-                          <span className="text-xs sm:text-[13px] font-bold text-white mt-0.5 font-mono">
-                            {prodStats.lead}
-                          </span>
-                        </div>
-
-                        {/* 2. Confirm */}
+                      {/* কার্ডের ৬টি চিকন ডাটা বক্স (Confirm | Delivery | Pending | Partial | Quantity | Cancel) */}
+                      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-1.5 sm:gap-2">
+                        {/* 1. Confirm */}
                         <div className="bg-[#141824] border border-[#20283c] group-hover:border-pink-500/30 rounded-lg py-1 px-1.5 text-center flex flex-col justify-center transition-all min-h-[42px]">
                           <span className="text-[10px] text-gray-400 font-medium block truncate">Confirm</span>
                           <span className="text-xs sm:text-[13px] font-bold text-pink-400 mt-0.5 font-mono whitespace-nowrap">
@@ -1809,7 +1835,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                           </span>
                         </div>
 
-                        {/* 3. Delivery */}
+                        {/* 2. Delivery */}
                         <div className="bg-[#141824] border border-[#20283c] group-hover:border-emerald-500/30 rounded-lg py-1 px-1.5 text-center flex flex-col justify-center transition-all min-h-[42px]">
                           <span className="text-[10px] text-gray-400 font-medium block truncate">Delivery</span>
                           <span className="text-xs sm:text-[13px] font-bold text-emerald-400 mt-0.5 font-mono whitespace-nowrap">
@@ -1817,7 +1843,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                           </span>
                         </div>
 
-                        {/* 4. Pending */}
+                        {/* 3. Pending */}
                         <div className="bg-[#141824] border border-[#20283c] group-hover:border-amber-500/30 rounded-lg py-1 px-1.5 text-center flex flex-col justify-center transition-all min-h-[42px]">
                           <span className="text-[10px] text-gray-400 font-medium block truncate">Pending</span>
                           <span className="text-xs sm:text-[13px] font-bold text-amber-400 mt-0.5 font-mono whitespace-nowrap">
@@ -1825,7 +1851,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                           </span>
                         </div>
 
-                        {/* 5. Partial */}
+                        {/* 4. Partial */}
                         <div className="bg-[#141824] border border-[#20283c] group-hover:border-orange-500/30 rounded-lg py-1 px-1.5 text-center flex flex-col justify-center transition-all min-h-[42px]">
                           <span className="text-[10px] text-gray-400 font-medium block truncate">Partial</span>
                           <span className="text-xs sm:text-[13px] font-bold text-orange-400 mt-0.5 font-mono whitespace-nowrap">
@@ -1833,7 +1859,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                           </span>
                         </div>
 
-                        {/* 6. Quantity */}
+                        {/* 5. Quantity */}
                         <div className="bg-[#141824] border border-[#20283c] group-hover:border-cyan-500/30 rounded-lg py-1 px-1.5 text-center flex flex-col justify-center transition-all min-h-[42px]">
                           <span className="text-[10px] text-gray-400 font-medium block truncate">Quantity</span>
                           <span className="text-xs sm:text-[13px] font-bold text-cyan-300 mt-0.5 font-mono">
@@ -1841,7 +1867,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                           </span>
                         </div>
 
-                        {/* 7. Cancel */}
+                        {/* 6. Cancel */}
                         <div className="bg-rose-500/20 border border-rose-500/40 group-hover:border-rose-400/60 rounded-lg py-1 px-1.5 text-center flex flex-col justify-center transition-all min-h-[42px]">
                           <span className="text-[10px] text-rose-300 font-medium block truncate">Cancel</span>
                           <span className="text-xs sm:text-[13px] font-bold text-rose-300 mt-0.5 font-mono whitespace-nowrap">
