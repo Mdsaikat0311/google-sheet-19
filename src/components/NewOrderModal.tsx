@@ -75,10 +75,14 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
   const [variant, setVariant] = useState('Rose 599tk');
   const [source, setSource] = useState('Website');
   const [status, setStatus] = useState<OrderStatus>('Complete');
+  const [isLocalSubmitting, setIsLocalSubmitting] = useState(false);
+  const isSubmittingRef = React.useRef(false);
 
   // Auto-populate real-time date/time and invoice ID when modal opens
   useEffect(() => {
     if (isOpen) {
+      isSubmittingRef.current = false;
+      setIsLocalSubmitting(false);
       setInvoiceId(`INV-${Math.floor(1000 + Math.random() * 9000)}`);
       setOrderDateTime(getRealTimeSheetDate());
       setCustomerName('');
@@ -96,10 +100,16 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmittingRef.current || isSubmitting || isLocalSubmitting) {
+      return;
+    }
     if (!customerName.trim()) {
       alert('অনুগ্রহ করে গ্রাহকের নাম লিখুন');
       return;
     }
+
+    isSubmittingRef.current = true;
+    setIsLocalSubmitting(true);
 
     const currentSheetDate = orderDateTime.trim() || getRealTimeSheetDate();
 
@@ -122,8 +132,13 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
       rawDate: currentSheetDate,
     };
 
-    await onSubmit(newOrder);
-    onClose();
+    try {
+      await onSubmit(newOrder);
+      onClose();
+    } finally {
+      isSubmittingRef.current = false;
+      setIsLocalSubmitting(false);
+    }
   };
 
   return (
@@ -346,7 +361,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
               )}
             </pre>
             <p className="text-[10px] text-gray-400">
-              সব লিখে কমপ্লিট বাটনে চাপলে স্বয়ংক্রিয়ভাবে এই JSON অবজেক্টটি <span className="text-pink-300 font-mono font-bold">new_order</span> হিসেবে গুগল শিট / ওয়েবহুকে সেন্ড হবে।
+              সব লিখে কমপ্লিট বাটনে চাপলে স্বয়ংক্রিয়ভাবে এই JSON অবজেক্টটি শুধু ১ বার <span className="text-pink-300 font-mono font-bold">new_order</span> হিসেবে গুগল শিট / ওয়েবহুকে সেন্ড হবে।
             </p>
           </div>
 
@@ -355,16 +370,17 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="px-3.5 sm:px-4 py-2.5 rounded-xl bg-[#202434] hover:bg-[#2a3044] text-gray-300 text-xs font-semibold transition-colors cursor-pointer active:scale-95"
+              disabled={isSubmitting || isLocalSubmitting}
+              className="px-3.5 sm:px-4 py-2.5 rounded-xl bg-[#202434] hover:bg-[#2a3044] text-gray-300 text-xs font-semibold transition-colors cursor-pointer active:scale-95 disabled:opacity-50"
             >
               বাতিল
             </button>
             <button
               type="submit"
-              disabled={isSubmitting || !customerName.trim()}
+              disabled={isSubmitting || isLocalSubmitting || !customerName.trim()}
               className="px-4 sm:px-5 py-2.5 rounded-xl bg-gradient-to-r from-pink-600 via-rose-600 to-pink-500 hover:from-pink-500 hover:to-rose-500 text-white text-xs font-bold shadow-lg shadow-pink-600/30 flex items-center gap-1.5 sm:gap-2 transition-all cursor-pointer disabled:opacity-50 active:scale-95 ml-auto"
             >
-              {isSubmitting ? (
+              {isSubmitting || isLocalSubmitting ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
                   <span>নতুন অর্ডার JSON পাঠানো হচ্ছে...</span>
@@ -372,7 +388,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
               ) : (
                 <>
                   <Send className="w-4 h-4" />
-                  <span>কমপ্লিট ও নতুন অর্ডার JSON সেন্ড করুন</span>
+                  <span>কমপ্লিট ও ১ বার নতুন অর্ডার JSON সেন্ড করুন</span>
                 </>
               )}
             </button>

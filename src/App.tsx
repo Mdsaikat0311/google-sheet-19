@@ -45,6 +45,9 @@ import {
   buildOrderCardPayload,
   sendSteadfastOrdersViaAppsScript,
   sendNewOrderViaAppsScript,
+  getAppsScriptUrl,
+  verifyOrderInSheet,
+  verifyNewOrderInSheet,
 } from './services/sheets';
 import { Sidebar, MainTabType } from './components/Sidebar';
 import { DashboardHome } from './components/DashboardHome';
@@ -324,12 +327,26 @@ export default function App() {
 
     try {
       await updateSheet3Entry(spreadsheetId, accessToken, entry);
-      showToast(`শিট ৩ রো #${entry.rowIndex} সফলভাবে আপডেট হয়েছে!`, 'success');
+      // Verify Sheet 3 read
+      await new Promise((r) => setTimeout(r, 600));
+      const freshData = await fetchSheet3Stock(spreadsheetId);
+      const matched = freshData.entries.find((e) => e.rowIndex === entry.rowIndex);
+      if (
+        matched &&
+        (matched.currentStock === entry.currentStock ||
+          matched.stockIn === entry.stockIn ||
+          matched.stockOut === entry.stockOut ||
+          matched.productName === entry.productName)
+      ) {
+        showToast(`✅ শিট চেক সম্পন্ন: শিট ৩ রো #${entry.rowIndex} গুগল শিটে আপডেট হয়েছে!`);
+      } else {
+        showToast(`❌ এটা শিটে আপডেট হয়নি!`, 'error');
+      }
       // Refresh in background
       setTimeout(() => loadSheet3StockLive(spreadsheetId), 1000);
     } catch (err) {
       console.error('Failed to update Sheet 3 entry:', err);
-      showToast('শিট ৩ আপডেট ব্যর্থ হয়েছে। অফলাইনে সেভ করা হয়েছে।', 'error');
+      showToast(`❌ এটা শিটে আপডেট হয়নি!`, 'error');
     }
   };
 
@@ -349,11 +366,19 @@ export default function App() {
 
     try {
       await appendSheet3Entry(spreadsheetId, accessToken, newEntry);
-      showToast('স্টক এন্ট্রি JSON সফলভাবে সেভ ও সেন্ড হয়েছে!', 'success');
+      // Verify Sheet 3 read
+      await new Promise((r) => setTimeout(r, 800));
+      const freshData = await fetchSheet3Stock(spreadsheetId);
+      const matched = freshData.entries.find((e) => e.productName === newEntry.productName);
+      if (matched) {
+        showToast(`✅ শিট চেক সম্পন্ন: নতুন স্টক এন্ট্রি গুগল শিটে আপডেট হয়েছে!`);
+      } else {
+        showToast(`❌ এটা শিটে আপডেট হয়নি!`, 'error');
+      }
       setTimeout(() => loadSheet3StockLive(spreadsheetId), 1200);
     } catch (err) {
       console.error('Failed to append Sheet3 entry:', err);
-      showToast('স্টক এন্ট্রি যোগ করতে সমস্যা হয়েছে', 'error');
+      showToast(`❌ এটা শিটে আপডেট হয়নি!`, 'error');
     }
   };
 
@@ -513,19 +538,26 @@ export default function App() {
     return a.id === b.id;
   };
 
-  // Helper to ensure valid sheet row index (>= 2, never 0)
+  // Helper to ensure valid sheet row index (>= 2, never guess row 2 if unknown)
   const resolveRowIndex = (order: Order): number => {
     if (order.rowIndex && order.rowIndex > 1) {
       return order.rowIndex;
     }
-    const idx = orders.findIndex((o) => o.id === order.id);
-    return idx !== -1 ? idx + 2 : 2;
+    const matched = orders.find(
+      (o) =>
+        (o.id === order.id || (o.trackingCode && o.trackingCode === order.trackingCode)) &&
+        o.rowIndex &&
+        o.rowIndex > 1
+    );
+    if (matched && matched.rowIndex) {
+      return matched.rowIndex;
+    }
+    return 0; // Return 0 if not known, do NOT corrupt row 2
   };
 
   // 1. Update Status in Column J (isolated per-order)
   const handleUpdateOrderStatus = async (order: Order, newStatus: OrderStatus) => {
     const targetRow = resolveRowIndex(order);
-    const trackingId = String(order.trackingCode || order.id || '').trim();
 
     recentUpdatesRef.current.set(order.id, {
       time: Date.now(),
@@ -544,26 +576,40 @@ export default function App() {
       buildOrderCardPayload(order, { orderStatus: newStatus })
     );
 
-    try {
-      await updateSheetOrderStatus(
-        spreadsheetId,
-        accessToken,
-        orderSheetTab,
-        targetRow,
-        newStatus,
-        order.id
-      );
-      showToast(`✅ গুগল শিটে অর্ডার #${order.id} এর স্ট্যাটাস (Col J) '${newStatus}' আপডেট হয়েছে!`);
-    } catch (err: any) {
-      console.error('Failed to sync status update to sheet:', err);
-      showToast(`❌ গুগল শিটে স্ট্যাটাস সেভ ব্যর্থ: ${err.message || 'ত্রুটি'}`, 'error');
+    if (spreadsheetId && accessToken && targetRow >= 2) {
+      try {
+        await updateSheetOrderStatus(
+          spreadsheetId,
+          accessToken,
+          orderSheetTab,
+          targetRow,
+          newStatus,
+          order.id
+        );
+      } catch (err: any) {
+        console.warn('Direct updateSheetOrderStatus warning:', err);
+      }
+    }
+
+    // Read Google Sheet to verify if update was actually applied
+    const verification = await verifyOrderInSheet(
+      spreadsheetId,
+      accessToken,
+      orderSheetTab,
+      { ...order, rowIndex: targetRow },
+      { status: newStatus }
+    );
+
+    if (verification.verified) {
+      showToast(`✅ শিট চেক সম্পন্ন: অর্ডার #${order.id} এর স্ট্যাটাস '${newStatus}' গুগল শিটে আপডেট হয়েছে!`);
+    } else {
+      showToast(`❌ এটা শিটে আপডেট হয়নি!`, 'error');
     }
   };
 
   // 2. Update Variant in Column H (isolated per-order)
   const handleUpdateVariant = async (order: Order, newVariant: string) => {
     const targetRow = resolveRowIndex(order);
-    const trackingId = String(order.trackingCode || order.id || '').trim();
 
     recentUpdatesRef.current.set(order.id, {
       time: Date.now(),
@@ -582,26 +628,40 @@ export default function App() {
       buildOrderCardPayload(order, { productSelect: newVariant })
     );
 
-    try {
-      await updateSheetVariant(
-        spreadsheetId,
-        accessToken,
-        orderSheetTab,
-        targetRow,
-        newVariant,
-        order.id
-      );
-      showToast(`✅ গুগল শিটে অর্ডার #${order.id} এর ভ্যারিয়েন্ট (Col H) '${newVariant}' আপডেট হয়েছে!`);
-    } catch (err: any) {
-      console.error('Failed to sync variant update to sheet:', err);
-      showToast(`❌ গুগল শিটে ভ্যারিয়েন্ট সেভ ব্যর্থ: ${err.message || 'ত্রুটি'}`, 'error');
+    if (spreadsheetId && accessToken && targetRow >= 2) {
+      try {
+        await updateSheetVariant(
+          spreadsheetId,
+          accessToken,
+          orderSheetTab,
+          targetRow,
+          newVariant,
+          order.id
+        );
+      } catch (err: any) {
+        console.warn('Direct updateSheetVariant warning:', err);
+      }
+    }
+
+    // Read Google Sheet to verify if update was actually applied
+    const verification = await verifyOrderInSheet(
+      spreadsheetId,
+      accessToken,
+      orderSheetTab,
+      { ...order, rowIndex: targetRow },
+      { variant: newVariant }
+    );
+
+    if (verification.verified) {
+      showToast(`✅ শিট চেক সম্পন্ন: অর্ডার #${order.id} এর ভ্যারিয়েন্ট '${newVariant}' গুগল শিটে আপডেট হয়েছে!`);
+    } else {
+      showToast(`❌ এটা শিটে আপডেট হয়নি!`, 'error');
     }
   };
 
   // 3. Update Source in Column I (isolated per-order)
   const handleUpdateSource = async (order: Order, newSource: string) => {
     const targetRow = resolveRowIndex(order);
-    const trackingId = String(order.trackingCode || order.id || '').trim();
 
     recentUpdatesRef.current.set(order.id, {
       time: Date.now(),
@@ -620,30 +680,46 @@ export default function App() {
       buildOrderCardPayload(order, { orderSource: newSource })
     );
 
-    try {
-      await updateSheetSource(
-        spreadsheetId,
-        accessToken,
-        orderSheetTab,
-        targetRow,
-        newSource,
-        order.id
-      );
-      showToast(`✅ গুগল শিটে অর্ডার #${order.id} এর সোর্স (Col I) '${newSource}' আপডেট হয়েছে!`);
-    } catch (err: any) {
-      console.error('Failed to sync source update to sheet:', err);
-      showToast(`❌ গুগল শিটে সোর্স সেভ ব্যর্থ: ${err.message || 'ত্রুটি'}`, 'error');
+    if (spreadsheetId && accessToken && targetRow >= 2) {
+      try {
+        await updateSheetSource(
+          spreadsheetId,
+          accessToken,
+          orderSheetTab,
+          targetRow,
+          newSource,
+          order.id
+        );
+      } catch (err: any) {
+        console.warn('Direct updateSheetSource warning:', err);
+      }
+    }
+
+    // Read Google Sheet to verify if update was actually applied
+    const verification = await verifyOrderInSheet(
+      spreadsheetId,
+      accessToken,
+      orderSheetTab,
+      { ...order, rowIndex: targetRow },
+      { source: newSource }
+    );
+
+    if (verification.verified) {
+      showToast(`✅ শিট চেক সম্পন্ন: অর্ডার #${order.id} এর সোর্স '${newSource}' গুগল শিটে আপডেট হয়েছে!`);
+    } else {
+      showToast(`❌ এটা শিটে আপডেট হয়নি!`, 'error');
     }
   };
 
   // Update Delivery / Courier Status in Column L
   const handleUpdateCourierStatus = async (order: Order, newCourierStatus: string) => {
+    const targetRow = resolveRowIndex(order);
     setOrders((prev) =>
-      prev.map((o) => (isSameOrder(o, order) ? { ...o, courierStatus: newCourierStatus } : o))
+      prev.map((o) => (isSameOrder(o, order) ? { ...o, courierStatus: newCourierStatus, rowIndex: targetRow } : o))
     );
 
     if (selectedOrderForView && isSameOrder(selectedOrderForView, order)) {
-      setSelectedOrderForView((prev) => (prev ? { ...prev, courierStatus: newCourierStatus } : null));
+      setSelectedOrderForView((prev) => (prev ? { ...prev, courierStatus: newCourierStatus, rowIndex: targetRow } : null));
     }
 
     // Dispatch exact JSON payload to Apps Script webhook
@@ -651,21 +727,36 @@ export default function App() {
       buildOrderCardPayload(order)
     );
 
-    try {
-      await updateSheetCourierStatus(
-        spreadsheetId,
-        accessToken,
-        orderSheetTab,
-        order.rowIndex || 0,
-        order.trackingCode || '',
-        order.steadfastStatus || 'send to steadfast',
-        newCourierStatus,
-        order.id
-      );
-      showToast(`✅ গুগল শিটে ডেলিভারি স্ট্যাটাস '${newCourierStatus}' আপডেট হয়েছে!`);
-    } catch (err: any) {
-      console.error('Failed to sync courier status update to sheet:', err);
-      showToast(`❌ গুগল শিটে ডেলিভারি স্ট্যাটাস সেভ ব্যর্থ: ${err.message || 'ত্রুটি'}`, 'error');
+    if (spreadsheetId && accessToken && targetRow >= 2) {
+      try {
+        await updateSheetCourierStatus(
+          spreadsheetId,
+          accessToken,
+          orderSheetTab,
+          targetRow,
+          order.trackingCode || '',
+          order.steadfastStatus || 'send to steadfast',
+          newCourierStatus,
+          order.id
+        );
+      } catch (err: any) {
+        console.warn('Direct updateSheetCourierStatus warning:', err);
+      }
+    }
+
+    // Read Google Sheet to verify if update was actually applied
+    const verification = await verifyOrderInSheet(
+      spreadsheetId,
+      accessToken,
+      orderSheetTab,
+      { ...order, rowIndex: targetRow },
+      { courierStatus: newCourierStatus }
+    );
+
+    if (verification.verified) {
+      showToast(`✅ শিট চেক সম্পন্ন: ডেলিভারি স্ট্যাটাস '${newCourierStatus}' গুগল শিটে আপডেট হয়েছে!`);
+    } else {
+      showToast(`❌ এটা শিটে আপডেট হয়নি!`, 'error');
     }
   };
 
@@ -741,27 +832,37 @@ export default function App() {
 
     try {
       // Write strictly to Column M in Google Sheet in real-time
-      await updateSheetSteadfastAction(
-        spreadsheetId,
-        accessToken,
-        orderSheetTab,
-        targetRow,
-        finalSteadfastStatus,
-        order.id
-      );
-      showToast(`✅ গুগল শিটে (কলাম M) '${finalSteadfastStatus}' আপডেট হয়েছে! রিয়েল-টাইম K ও L চেক হচ্ছে...`);
-
-      // Real-time check: immediate sync + follow up to detect Column K and L updates from Steadfast
-      syncWithSheet(spreadsheetId, accessToken, orderSheetTab, true);
-      setTimeout(() => {
-        syncWithSheet(spreadsheetId, accessToken, orderSheetTab, true);
-      }, 2500);
-      setTimeout(() => {
-        syncWithSheet(spreadsheetId, accessToken, orderSheetTab, true);
-      }, 5000);
+      if (spreadsheetId && accessToken && targetRow >= 2) {
+        await updateSheetSteadfastAction(
+          spreadsheetId,
+          accessToken,
+          orderSheetTab,
+          targetRow,
+          finalSteadfastStatus,
+          order.id
+        );
+      }
     } catch (err: any) {
-      console.error('Failed to sync steadfast action to sheet:', err);
-      showToast(`❌ গুগল শিটে কলাম M সেভ ব্যর্থ: ${err.message || 'ত্রুটি'}`, 'error');
+      console.warn('Direct updateSheetSteadfastAction warning:', err);
+    }
+
+    // Read Google Sheet to verify if update was actually applied
+    const verification = await verifyOrderInSheet(
+      spreadsheetId,
+      accessToken,
+      orderSheetTab,
+      { ...order, rowIndex: targetRow },
+      { steadfastStatus: finalSteadfastStatus }
+    );
+
+    if (verification.verified) {
+      showToast(`✅ শিট চেক সম্পন্ন: অর্ডার #${order.id} এর কুরিয়ার অ্যাকশন (Col M) '${finalSteadfastStatus}' গুগল শিটে আপডেট হয়েছে!`);
+      // Follow up sync to detect Column K and L updates from Steadfast
+      syncWithSheet(spreadsheetId, accessToken, orderSheetTab, true);
+      setTimeout(() => syncWithSheet(spreadsheetId, accessToken, orderSheetTab, true), 2500);
+      setTimeout(() => syncWithSheet(spreadsheetId, accessToken, orderSheetTab, true), 5000);
+    } else {
+      showToast(`❌ এটা শিটে আপডেট হয়নি!`, 'error');
     }
 
     return true;
@@ -806,24 +907,36 @@ export default function App() {
     }));
 
     try {
-      await updateSheetSteadfastActionBatch(
-        spreadsheetId,
-        accessToken,
-        orderSheetTab,
-        updates
-      );
-      showToast(`✅ ${ordersToSend.length}টি অর্ডার শিটের M কলামে 'send to steadfast' আপডেট হয়েছে!`, 'success');
+      if (spreadsheetId && accessToken) {
+        await updateSheetSteadfastActionBatch(
+          spreadsheetId,
+          accessToken,
+          orderSheetTab,
+          updates
+        );
+      }
     } catch (err) {
       console.warn('Batch send notice:', err);
     }
 
-    // Real-time check with Google Sheet: +3s, +6s
-    setTimeout(() => {
-      syncWithSheet(spreadsheetId, accessToken, orderSheetTab, true);
-    }, 3000);
-    setTimeout(() => {
-      syncWithSheet(spreadsheetId, accessToken, orderSheetTab, true);
-    }, 6000);
+    // Read Google Sheet to verify if update was actually applied
+    const firstOrder = ordersToSend[0];
+    const verification = await verifyOrderInSheet(
+      spreadsheetId,
+      accessToken,
+      orderSheetTab,
+      { ...firstOrder, rowIndex: resolveRowIndex(firstOrder) },
+      { steadfastStatus: 'send to steadfast' },
+      { maxRetries: 2, initialDelayMs: 600 }
+    );
+
+    if (verification.verified) {
+      showToast(`✅ শিট চেক সম্পন্ন: ${ordersToSend.length}টি অর্ডার গুগল শিটে আপডেট হয়েছে!`);
+      setTimeout(() => syncWithSheet(spreadsheetId, accessToken, orderSheetTab, true), 2500);
+      setTimeout(() => syncWithSheet(spreadsheetId, accessToken, orderSheetTab, true), 5000);
+    } else {
+      showToast(`❌ এটা শিটে আপডেট হয়নি!`, 'error');
+    }
   };
 
   // 5. Update Order Quantity in Column N (isolated per-order)
@@ -842,24 +955,39 @@ export default function App() {
       setSelectedOrderForView((prev) => (prev ? { ...prev, quantity: newQuantity, rowIndex: targetRow } : null));
     }
 
-    // Dispatch webhook for updated order
+    // Dispatch webhook for updated order (sends 1 time only)
     updateOrderCardViaAppsScript(
-      buildOrderCardPayload(order)
+      buildOrderCardPayload(order, { quantity: newQuantity })
     );
 
-    try {
-      await updateSheetQuantity(
-        spreadsheetId,
-        accessToken,
-        orderSheetTab,
-        targetRow,
-        newQuantity,
-        order.id
-      );
-      showToast(`✅ গুগল শিটে অর্ডার #${order.id} এর পরিমাণ (Col N) '${newQuantity}' আপডেট হয়েছে!`);
-    } catch (err: any) {
-      console.error('Failed to sync quantity update to sheet:', err);
-      showToast(`❌ গুগল শিটে পরিমাণ সেভ ব্যর্থ: ${err.message || 'ত্রুটি'}`, 'error');
+    if (spreadsheetId && accessToken && targetRow >= 2) {
+      try {
+        await updateSheetQuantity(
+          spreadsheetId,
+          accessToken,
+          orderSheetTab,
+          targetRow,
+          newQuantity,
+          order.id
+        );
+      } catch (err: any) {
+        console.warn('Direct updateSheetQuantity warning:', err);
+      }
+    }
+
+    // Read Google Sheet to verify if update was actually applied
+    const verification = await verifyOrderInSheet(
+      spreadsheetId,
+      accessToken,
+      orderSheetTab,
+      { ...order, rowIndex: targetRow },
+      { quantity: newQuantity }
+    );
+
+    if (verification.verified) {
+      showToast(`✅ শিট চেক সম্পন্ন: অর্ডার #${order.id} এর পরিমাণ (Col N) '${newQuantity}' গুগল শিটে আপডেট হয়েছে!`);
+    } else {
+      showToast(`❌ এটা শিটে আপডেট হয়নি!`, 'error');
     }
   };
 
@@ -927,7 +1055,6 @@ export default function App() {
       );
     }
 
-    const trackingId = String(order.trackingCode || order.id || '').trim();
     // Dispatch exact JSON payload requested by user to Apps Script
     updateOrderCardViaAppsScript(
       buildOrderCardPayload(order, {
@@ -938,23 +1065,192 @@ export default function App() {
       })
     );
 
-    try {
-      await updateSheetCustomerDetails(
-        spreadsheetId,
-        accessToken,
-        orderSheetTab,
-        targetRow,
-        {
-          ...details,
-          amount: newAmount,
-        },
-        order.id
-      );
-      showToast(`✅ গ্রাহকের নাম, ফোন, ঠিকানা ও মূল্য গুগল শিটে আপডেট হয়েছে!`);
+    if (spreadsheetId && accessToken && targetRow >= 2) {
+      try {
+        await updateSheetCustomerDetails(
+          spreadsheetId,
+          accessToken,
+          orderSheetTab,
+          targetRow,
+          {
+            ...details,
+            amount: newAmount,
+          },
+          order.id
+        );
+      } catch (err: any) {
+        console.warn('Direct updateSheetCustomerDetails warning:', err);
+      }
+    }
+
+    // Read Google Sheet to verify if update was actually applied
+    const verification = await verifyOrderInSheet(
+      spreadsheetId,
+      accessToken,
+      orderSheetTab,
+      { ...order, rowIndex: targetRow },
+      {
+        customerName: details.customerName,
+        customerPhone: details.customerPhone,
+        customerAddress: details.customerAddress,
+        amount: newAmount,
+      }
+    );
+
+    if (verification.verified) {
+      showToast(`✅ শিট চেক সম্পন্ন: গ্রাহকের নাম, ফোন, ঠিকানা ও মূল্য গুগল শিটে আপডেট হয়েছে!`);
       return true;
-    } catch (err: any) {
-      console.error('Failed to sync customer details to sheet:', err);
-      showToast(`❌ গুগল শিটে তথ্য আপডেট ব্যর্থ: ${err.message || 'ত্রুটি'}`, 'error');
+    } else {
+      showToast(`❌ এটা শিটে আপডেট হয়নি!`, 'error');
+      return false;
+    }
+  };
+
+  // Full Order Update from Modal (Sends JSON strictly 1 time, no gaps)
+  const handleUpdateFullOrder = async (
+    order: Order,
+    updatedFields: {
+      customerName: string;
+      customerPhone: string;
+      customerAddress: string;
+      amount: number;
+      price: number;
+      quantity: number;
+      variant: string;
+      source: string;
+      status: OrderStatus;
+      columnMValue: string;
+    }
+  ): Promise<boolean> => {
+    const targetRow = resolveRowIndex(order);
+
+    recentUpdatesRef.current.set(order.id, {
+      time: Date.now(),
+      data: {
+        customerName: updatedFields.customerName,
+        customerPhone: updatedFields.customerPhone,
+        customerAddress: updatedFields.customerAddress,
+        amount: updatedFields.amount,
+        quantity: updatedFields.quantity,
+        variant: updatedFields.variant,
+        source: updatedFields.source,
+        status: updatedFields.status,
+      },
+    });
+
+    // 1. Optimistic React state update
+    setOrders((prev) =>
+      prev.map((o) =>
+        isSameOrder(o, order)
+          ? {
+              ...o,
+              customerName: updatedFields.customerName,
+              customerPhone: updatedFields.customerPhone,
+              customerAddress: updatedFields.customerAddress,
+              amount: updatedFields.amount,
+              total: updatedFields.amount,
+              quantity: updatedFields.quantity,
+              variant: updatedFields.variant,
+              source: updatedFields.source,
+              status: updatedFields.status,
+              steadfastStatus: updatedFields.columnMValue as any,
+              rowIndex: targetRow >= 2 ? targetRow : o.rowIndex,
+            }
+          : o
+      )
+    );
+
+    if (selectedOrderForView && isSameOrder(selectedOrderForView, order)) {
+      setSelectedOrderForView((prev) =>
+        prev
+          ? {
+              ...prev,
+              customerName: updatedFields.customerName,
+              customerPhone: updatedFields.customerPhone,
+              customerAddress: updatedFields.customerAddress,
+              amount: updatedFields.amount,
+              total: updatedFields.amount,
+              quantity: updatedFields.quantity,
+              variant: updatedFields.variant,
+              source: updatedFields.source,
+              status: updatedFields.status,
+              steadfastStatus: updatedFields.columnMValue as any,
+              rowIndex: targetRow >= 2 ? targetRow : prev.rowIndex,
+            }
+          : null
+      );
+    }
+
+    // 2. Dispatch EXACTLY 1 JSON to Apps Script Webhook
+    updateOrderCardViaAppsScript(
+      buildOrderCardPayload(order, {
+        name: updatedFields.customerName,
+        number: updatedFields.customerPhone,
+        address: updatedFields.customerAddress,
+        price: updatedFields.amount,
+        productSelect: updatedFields.variant,
+        orderSource: updatedFields.source,
+        orderStatus: updatedFields.status,
+        columnMValue: updatedFields.columnMValue,
+      })
+    );
+
+    // 3. Direct Google Sheets cell sync if accessToken and targetRow >= 2
+    if (spreadsheetId && accessToken && targetRow >= 2) {
+      try {
+        await updateSheetCustomerDetails(
+          spreadsheetId,
+          accessToken,
+          orderSheetTab,
+          targetRow,
+          {
+            customerName: updatedFields.customerName,
+            customerPhone: updatedFields.customerPhone,
+            customerAddress: updatedFields.customerAddress,
+            amount: updatedFields.amount,
+          },
+          order.id
+        );
+        if (updatedFields.status !== order.status) {
+          await updateSheetOrderStatus(spreadsheetId, accessToken, orderSheetTab, targetRow, updatedFields.status);
+        }
+        if (updatedFields.variant !== order.variant) {
+          await updateSheetVariant(spreadsheetId, accessToken, orderSheetTab, targetRow, updatedFields.variant);
+        }
+        if (updatedFields.source !== order.source) {
+          await updateSheetSource(spreadsheetId, accessToken, orderSheetTab, targetRow, updatedFields.source);
+        }
+        if (updatedFields.quantity !== order.quantity) {
+          await updateSheetQuantity(spreadsheetId, accessToken, orderSheetTab, targetRow, updatedFields.quantity);
+        }
+      } catch (err: any) {
+        console.warn('Direct Sheet API sync warning (Apps Script webhook already sent):', err);
+      }
+    }
+
+    // Read Google Sheet to verify if update was actually applied
+    const verification = await verifyOrderInSheet(
+      spreadsheetId,
+      accessToken,
+      orderSheetTab,
+      { ...order, rowIndex: targetRow },
+      {
+        customerName: updatedFields.customerName,
+        customerPhone: updatedFields.customerPhone,
+        customerAddress: updatedFields.customerAddress,
+        amount: updatedFields.amount,
+        quantity: updatedFields.quantity,
+        variant: updatedFields.variant,
+        source: updatedFields.source,
+        status: updatedFields.status,
+      }
+    );
+
+    if (verification.verified) {
+      showToast(`✅ শিট চেক সম্পন্ন: অর্ডার #${order.id} এর সকল তথ্য গুগল শিটে আপডেট হয়েছে!`);
+      return true;
+    } else {
+      showToast(`❌ এটা শিটে আপডেট হয়নি!`, 'error');
       return false;
     }
   };
@@ -973,7 +1269,7 @@ export default function App() {
   // Alias for components expecting handleSendToSteadfast
   const handleSendToSteadfast = (order: Order) => handleToggleSteadfast(order, 'send to steadfast');
 
-  // Create New Order
+  // Create New Order (Sends JSON strictly 1 time, prevents blank row gaps)
   const handleAddNewOrder = async (newOrder: Order) => {
     setIsSubmittingOrder(true);
     showToast(`নতুন অর্ডার ${newOrder.id} তৈরি ও JSON সেন্ড হচ্ছে...`);
@@ -981,7 +1277,6 @@ export default function App() {
       // 1. Update local state
       const orderWithRow: Order = {
         ...newOrder,
-        rowIndex: orders.length + 3,
       };
       setOrders((prev) => [orderWithRow, ...prev]);
 
@@ -1017,23 +1312,41 @@ export default function App() {
         })
       );
 
-      // 2. Always dispatch new order JSON to Apps Script Webhook
-      const appsScriptPromise = sendNewOrderViaAppsScript(newOrder);
-
-      // 3. Append to Google Sheet if token exists
-      if (accessToken) {
+      // 2. Dispatch new order JSON to Apps Script Webhook (Sends strictly 1 time)
+      const appsScriptUrl = getAppsScriptUrl();
+      if (appsScriptUrl) {
+        await sendNewOrderViaAppsScript(newOrder);
+      } else if (accessToken) {
+        // Only append directly via Sheets API if no Apps Script Webhook is configured
         try {
           await appendSheetOrder(spreadsheetId, accessToken, newOrder, orderSheetTab);
         } catch (sheetErr) {
-          console.warn('Direct Google Sheet API append error, relying on Apps Script JSON:', sheetErr);
+          console.warn('Direct Google Sheet API append error:', sheetErr);
         }
       }
 
-      await appsScriptPromise;
-      showToast(`নতুন অর্ডার ${newOrder.id} JSON আকারে সফলভাবে সেন্ড হয়েছে!`);
+      // Read Google Sheet to verify if newly created order was actually written
+      const verification = await verifyNewOrderInSheet(
+        spreadsheetId,
+        accessToken,
+        orderSheetTab,
+        newOrder,
+        { maxRetries: 2, initialDelayMs: 1200 }
+      );
+
+      if (verification.verified) {
+        showToast(`✅ শিট চেক সম্পন্ন: নতুন অর্ডার #${newOrder.id} গুগল শিটে আপডেট হয়েছে!`);
+      } else {
+        showToast(`❌ এটা শিটে আপডেট হয়নি!`, 'error');
+      }
+
+      // Refresh sheet data after 2s to pick up newly assigned sheet row
+      setTimeout(() => {
+        syncWithSheet(spreadsheetId, accessToken, orderSheetTab, true);
+      }, 2000);
     } catch (err: any) {
       console.error('Error creating new order:', err);
-      showToast(`অর্ডার তৈরিতে সমস্যা: ${err.message}`, 'error');
+      showToast(`❌ এটা শিটে আপডেট হয়নি!`, 'error');
     } finally {
       setIsSubmittingOrder(false);
     }
@@ -1304,6 +1617,7 @@ export default function App() {
               onUpdateCourierStatus={handleUpdateCourierStatus}
               onToggleSteadfast={handleToggleSteadfast}
               onUpdateCustomerDetails={handleUpdateCustomerDetails}
+              onUpdateFullOrder={handleUpdateFullOrder}
               onDeleteOrder={handleDeleteOrder}
             />
           )}

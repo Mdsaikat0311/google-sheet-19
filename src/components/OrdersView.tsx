@@ -109,6 +109,21 @@ export interface OrdersViewProps {
       price?: number;
     }
   ) => Promise<boolean> | void;
+  onUpdateFullOrder?: (
+    order: Order,
+    updatedFields: {
+      customerName: string;
+      customerPhone: string;
+      customerAddress: string;
+      amount: number;
+      price: number;
+      quantity: number;
+      variant: string;
+      source: string;
+      status: OrderStatus;
+      columnMValue: string;
+    }
+  ) => Promise<boolean | void> | void;
   onDeleteOrder?: (order: Order) => void;
 }
 
@@ -128,6 +143,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
   onUpdateQuantity,
   onToggleSteadfast,
   onUpdateCustomerDetails,
+  onUpdateFullOrder,
   onDeleteOrder,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
@@ -183,7 +199,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
     setEditStatus(order.status || 'Pending');
   };
 
-  // Save all edited fields directly to Google Sheet
+  // Save all edited fields directly to Google Sheet (Sends 1 time only)
   const handleSaveEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingOrder) return;
@@ -191,61 +207,36 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
 
     try {
       const order = editingOrder;
-      const trackingId = String(order.trackingCode || order.id || '').trim();
       const colM = String(order.steadfastStatus || 'No Select').trim();
 
-      // 1. Dispatch exact requested POST payload with Column A date to Apps Script WEB_APP_URL
-      await updateOrderCardViaAppsScript(
-        buildOrderCardPayload(order, {
-          address: editAddress.trim(),
-          number: editPhone.trim(),
+      if (onUpdateFullOrder) {
+        await onUpdateFullOrder(order, {
+          customerName: editName.trim(),
+          customerPhone: editPhone.trim(),
+          customerAddress: editAddress.trim(),
+          amount: Number(editPrice) || 0,
           price: Number(editPrice) || 0,
-          name: editName.trim(),
-          productSelect: editVariant,
-          orderSource: editSource,
-          orderStatus: editStatus,
+          quantity: editQuantity,
+          variant: editVariant,
+          source: editSource,
+          status: editStatus,
           columnMValue: colM,
-        })
-      );
-
-      const tasks: Promise<any>[] = [];
-
-      // 2. Sync React local state & sheet fallbacks
-      if (onUpdateCustomerDetails) {
-        tasks.push(
-          Promise.resolve(
-            onUpdateCustomerDetails(order, {
-              customerName: editName.trim(),
-              customerPhone: editPhone.trim(),
-              customerAddress: editAddress.trim(),
-              amount: Number(editPrice) || 0,
-              price: Number(editPrice) || 0,
-            })
-          )
+        });
+      } else {
+        // Fallback: send 1 time via updateOrderCardViaAppsScript
+        await updateOrderCardViaAppsScript(
+          buildOrderCardPayload(order, {
+            address: editAddress.trim(),
+            number: editPhone.trim(),
+            price: Number(editPrice) || 0,
+            name: editName.trim(),
+            productSelect: editVariant,
+            orderSource: editSource,
+            orderStatus: editStatus,
+            columnMValue: colM,
+          })
         );
       }
-
-      // Quantity (Col N)
-      if (onUpdateQuantity && editQuantity !== order.quantity) {
-        tasks.push(Promise.resolve(onUpdateQuantity(order, editQuantity)));
-      }
-
-      // Variant (Col H)
-      if (onUpdateVariant && editVariant !== order.variant) {
-        tasks.push(Promise.resolve(onUpdateVariant(order, editVariant)));
-      }
-
-      // Source (Col I)
-      if (onUpdateSource && editSource !== order.source) {
-        tasks.push(Promise.resolve(onUpdateSource(order, editSource)));
-      }
-
-      // Status (Col J)
-      if (onUpdateOrderStatus && editStatus !== order.status) {
-        tasks.push(Promise.resolve(onUpdateOrderStatus(order, editStatus)));
-      }
-
-      await Promise.allSettled(tasks);
       setEditingOrder(null);
     } catch (err) {
       console.error('Error saving order edits:', err);

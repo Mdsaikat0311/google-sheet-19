@@ -329,13 +329,13 @@ export const appendSheetProduct = async (
 };
 
 /**
- * Append an order to the Google Sheet (matches user's screenshot columns)
+ * Append an order to the Google Sheet (strictly matching Sheet2 columns)
  */
 export const appendSheetOrder = async (
   spreadsheetId: string,
   accessToken: string,
   order: Order,
-  tabName: string = 'Sheet1'
+  tabName: string = 'Sheet2'
 ) => {
   // Check available tabs to find the best tab name
   let targetTab = tabName;
@@ -343,39 +343,34 @@ export const appendSheetOrder = async (
     const meta = await getSpreadsheetMetadata(spreadsheetId, accessToken);
     const sheets = meta.sheets || [];
     const sheetTitles = sheets.map((s: any) => s.properties?.title || '');
-    const matched = sheetTitles.find((t: string) => /order|অর্ডার|sheet1/i.test(t));
+    const matched = sheetTitles.find((t: string) => /sheet2|order|অর্ডার/i.test(t));
     if (matched) targetTab = matched;
-    else if (sheetTitles.length > 0) targetTab = sheetTitles[0];
   } catch (e) {
     console.warn('Metadata check in appendSheetOrder:', e);
   }
 
-  // Row columns matching screenshot:
-  // [Invoice ID, Customer Name, Phone, Address, Product, Source/Amount, Status, Tracking Code, Courier Status, Send to Steadfast, Quantity, Total Spend]
+  // Row columns matching Sheet2 layout:
+  // A: Date | B: Address | C: Phone | D: COD/Price | E: Product | F: Name | G: Blank | H: Variant | I: Source | J: Status | K: Tracking ID | L: Courier Status | M: Courier Action | N: Quantity
   const row = [
-    order.date || '', // Column A: Date
-    order.id || `INV-${Date.now().toString().slice(-4)}`, // Column B: Invoice ID
-    order.customerName, // Column C: Customer Name
-    order.customerPhone, // Column D: Phone
-    order.customerAddress, // Column E: Address
-    order.product || 'Standard Item', // Column F: Product
-    order.source || 'Website', // Column G: Source
-    order.status || 'Complete', // Column H: Status
-    order.trackingCode || `29${Math.floor(1000000 + Math.random() * 9000000)}`, // Column I: Tracking Code
-    order.courierStatus || 'pending', // Column J: Courier Status
-    order.steadfastStatus || 'send to steadfast', // Column K: Steadfast Status
-    order.quantity || 1, // Column L: Quantity
-    order.amount || order.total || 0, // Column M: Total Spend
+    order.date || order.rawDate || '', // Column A: Date
+    order.customerAddress || '', // Column B: Address
+    order.customerPhone || '', // Column C: Phone
+    Number(order.amount ?? order.total ?? 0) || 0, // Column D: COD / Price
+    order.product || 'Standard Item', // Column E: Product
+    order.customerName || '', // Column F: Customer Name
+    '', // Column G: Empty
+    order.variant || 'Rose 599tk', // Column H: Variant
+    order.source || 'Website', // Column I: Source
+    order.status || 'Pending', // Column J: Status
+    order.trackingCode || order.id || '', // Column K: Tracking Code
+    order.courierStatus || 'pending', // Column L: Courier Status
+    order.steadfastStatus || 'No Sellect', // Column M: Steadfast Status
+    Number(order.quantity) || 1, // Column N: Quantity
   ];
 
-  // Also trigger Apps Script JSON dispatch in parallel
-  sendNewOrderViaAppsScript(order).catch((err) =>
-    console.warn('[appendSheetOrder] Apps Script new_order warning:', err)
-  );
-
-  const appendRange = `'${targetTab}'!A:M`;
+  const appendRange = `'${targetTab}'!A:N`;
   const appendRes = await fetch(
-    `${SHEETS_API_BASE}/${spreadsheetId}/values/${encodeURIComponent(appendRange)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
+    `${SHEETS_API_BASE}/${spreadsheetId}/values/${encodeURIComponent(appendRange)}:append?valueInputOption=USER_ENTERED&insertDataOption=OVERWRITE`,
     {
       method: 'POST',
       headers: {
@@ -570,10 +565,10 @@ export const fetchPublicSheetOrders = async (
   const cleanId = extractSpreadsheetId(spreadsheetId);
   const targetTab = preferredTab || 'Sheet2';
   const tabQuery = `&sheet=${encodeURIComponent(targetTab)}`;
-  const url = `https://docs.google.com/spreadsheets/d/${cleanId}/gviz/tq?tqx=out:json${tabQuery}`;
+  const url = `https://docs.google.com/spreadsheets/d/${cleanId}/gviz/tq?tqx=out:json${tabQuery}&_t=${Date.now()}`;
 
   try {
-    const res = await fetch(url);
+    const res = await fetch(url, { cache: 'no-store' });
     if (res.ok) {
       const text = await res.text();
       const match = text.match(/google\.visualization\.Query\.setResponse\(([\s\S]+)\);/);
@@ -976,6 +971,232 @@ export const getSheetOrders = async (
   }
 };
 
+export interface OrderVerificationCriteria {
+  status?: string;
+  variant?: string;
+  source?: string;
+  quantity?: number;
+  steadfastStatus?: string;
+  courierStatus?: string;
+  customerName?: string;
+  customerPhone?: string;
+  customerAddress?: string;
+  amount?: number;
+}
+
+/**
+ * Reads Google Sheet to strictly check and verify if an order update was actually applied.
+ */
+export const verifyOrderInSheet = async (
+  spreadsheetId: string,
+  accessToken: string | null | undefined,
+  tabName: string,
+  order: Order,
+  checks: OrderVerificationCriteria,
+  options: { maxRetries?: number; initialDelayMs?: number; retryDelayMs?: number } = {}
+): Promise<{ verified: boolean; matchedOrder?: Order; reason?: string }> => {
+  const maxRetries = options.maxRetries ?? 2;
+  const initialDelayMs = options.initialDelayMs ?? 400;
+  const retryDelayMs = options.retryDelayMs ?? 1100;
+
+  if (initialDelayMs > 0) {
+    await new Promise((r) => setTimeout(r, initialDelayMs));
+  }
+
+  const norm = (v: any) => String(v ?? '').trim().toLowerCase();
+  const cleanPhone = (p: any) => String(p ?? '').replace(/\D/g, '').slice(-10);
+
+  const testMatch = (candidate: Order): boolean => {
+    if (checks.status !== undefined) {
+      const exp = norm(checks.status);
+      const act = norm(candidate.status);
+      if (exp && !act.includes(exp) && !exp.includes(act)) {
+        return false;
+      }
+    }
+    if (checks.variant !== undefined) {
+      const exp = norm(checks.variant);
+      const act = norm(candidate.variant);
+      if (exp && !act.includes(exp) && !exp.includes(act)) {
+        return false;
+      }
+    }
+    if (checks.source !== undefined) {
+      const exp = norm(checks.source);
+      const act = norm(candidate.source);
+      if (exp && !act.includes(exp) && !exp.includes(act)) {
+        return false;
+      }
+    }
+    if (checks.quantity !== undefined) {
+      if (Number(candidate.quantity) !== Number(checks.quantity)) {
+        return false;
+      }
+    }
+    if (checks.steadfastStatus !== undefined) {
+      const exp = norm(checks.steadfastStatus);
+      const act = norm(candidate.steadfastStatus);
+      const isExpSent = /send to steadfast/i.test(exp);
+      const isActSent = /send to steadfast/i.test(act);
+      if (isExpSent !== isActSent) {
+        return false;
+      }
+    }
+    if (checks.courierStatus !== undefined) {
+      const exp = norm(checks.courierStatus);
+      const act = norm(candidate.courierStatus);
+      if (exp && !act.includes(exp) && !exp.includes(act)) {
+        return false;
+      }
+    }
+    if (checks.customerName !== undefined) {
+      const exp = norm(checks.customerName);
+      const act = norm(candidate.customerName);
+      if (exp && act && !act.includes(exp) && !exp.includes(act)) {
+        return false;
+      }
+    }
+    if (checks.customerPhone !== undefined) {
+      const expP = cleanPhone(checks.customerPhone);
+      const actP = cleanPhone(candidate.customerPhone);
+      if (expP && actP && expP !== actP) {
+        return false;
+      }
+    }
+    if (checks.customerAddress !== undefined) {
+      const exp = norm(checks.customerAddress);
+      const act = norm(candidate.customerAddress);
+      if (exp && act && !act.includes(exp) && !exp.includes(act)) {
+        return false;
+      }
+    }
+    if (checks.amount !== undefined) {
+      const expA = Number(checks.amount);
+      const actA = Number(candidate.amount ?? candidate.total ?? 0);
+      if (!isNaN(expA) && !isNaN(actA) && Math.abs(expA - actA) > 1) {
+        return false;
+      }
+    }
+    return true;
+  };
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    if (attempt > 0) {
+      await new Promise((r) => setTimeout(r, retryDelayMs));
+    }
+
+    try {
+      // 1. Direct row read if accessToken and valid rowIndex >= 2
+      if (accessToken && order.rowIndex && order.rowIndex >= 2) {
+        try {
+          const rowRes = await fetch(
+            `${SHEETS_API_BASE}/${spreadsheetId}/values/'${encodeURIComponent(tabName)}'!A${order.rowIndex}:N${order.rowIndex}?valueRenderOption=FORMATTED_VALUE`,
+            {
+              headers: { Authorization: `Bearer ${accessToken}`, 'Cache-Control': 'no-cache' },
+            }
+          );
+          if (rowRes.ok) {
+            const rowData = await rowRes.json();
+            const rowValues = rowData.values?.[0] || [];
+            if (rowValues.length > 0) {
+              const rowCandidate: Order = {
+                id: String(rowValues[10] || rowValues[0] || order.id),
+                customerAddress: String(rowValues[1] || ''),
+                customerPhone: String(rowValues[2] || ''),
+                amount: Number(rowValues[3]) || 0,
+                total: Number(rowValues[3]) || 0,
+                product: String(rowValues[4] || ''),
+                customerName: String(rowValues[5] || ''),
+                variant: String(rowValues[7] || ''),
+                source: String(rowValues[8] || ''),
+                status: (rowValues[9] as any) || 'Pending',
+                trackingCode: String(rowValues[10] || ''),
+                courierStatus: (rowValues[11] as any) || undefined,
+                steadfastStatus: (rowValues[12] as any) || 'No Sellect',
+                quantity: Number(rowValues[13]) || 1,
+                date: String(rowValues[0] || order.date || ''),
+                rowIndex: order.rowIndex,
+              };
+              if (testMatch(rowCandidate)) {
+                return { verified: true, matchedOrder: rowCandidate };
+              }
+            }
+          }
+        } catch (rowErr) {
+          console.warn('Direct row verify error:', rowErr);
+        }
+      }
+
+      // 2. Full Sheet Read via getSheetOrders (fetches live rows)
+      const sheetResult = await getSheetOrders(spreadsheetId, accessToken, tabName);
+      if (sheetResult.orders && sheetResult.orders.length > 0) {
+        const candidate = sheetResult.orders.find(
+          (o) =>
+            (order.id && o.id && String(o.id).trim() === String(order.id).trim()) ||
+            (order.trackingCode && o.trackingCode && String(o.trackingCode).trim() === String(order.trackingCode).trim()) ||
+            (order.rowIndex && o.rowIndex && o.rowIndex === order.rowIndex) ||
+            (order.customerPhone && o.customerPhone && cleanPhone(o.customerPhone) === cleanPhone(order.customerPhone))
+        );
+
+        if (candidate && testMatch(candidate)) {
+          return { verified: true, matchedOrder: candidate };
+        }
+      }
+    } catch (err) {
+      console.warn(`Verify attempt ${attempt} error:`, err);
+    }
+  }
+
+  return { verified: false, reason: 'Sheet values do not match requested update' };
+};
+
+/**
+ * Reads Google Sheet to check if a newly created order was actually inserted.
+ */
+export const verifyNewOrderInSheet = async (
+  spreadsheetId: string,
+  accessToken: string | null | undefined,
+  tabName: string,
+  newOrder: Order,
+  options: { maxRetries?: number; initialDelayMs?: number; retryDelayMs?: number } = {}
+): Promise<{ verified: boolean; matchedOrder?: Order }> => {
+  const maxRetries = options.maxRetries ?? 2;
+  const initialDelayMs = options.initialDelayMs ?? 1000;
+  const retryDelayMs = options.retryDelayMs ?? 1500;
+
+  if (initialDelayMs > 0) {
+    await new Promise((r) => setTimeout(r, initialDelayMs));
+  }
+
+  const cleanPhone = (p: any) => String(p ?? '').replace(/\D/g, '').slice(-10);
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    if (attempt > 0) {
+      await new Promise((r) => setTimeout(r, retryDelayMs));
+    }
+
+    try {
+      const sheetResult = await getSheetOrders(spreadsheetId, accessToken, tabName);
+      if (sheetResult.orders && sheetResult.orders.length > 0) {
+        const found = sheetResult.orders.find(
+          (o) =>
+            (newOrder.id && o.id && String(o.id).trim() === String(newOrder.id).trim()) ||
+            (newOrder.trackingCode && o.trackingCode && String(o.trackingCode).trim() === String(newOrder.trackingCode).trim()) ||
+            (newOrder.customerPhone && o.customerPhone && cleanPhone(o.customerPhone) === cleanPhone(newOrder.customerPhone))
+        );
+
+        if (found) {
+          return { verified: true, matchedOrder: found };
+        }
+      }
+    } catch (err) {
+      console.warn(`New order verify attempt ${attempt} error:`, err);
+    }
+  }
+
+  return { verified: false };
+};
+
 export const DEFAULT_APPS_SCRIPT_URL =
   'https://script.google.com/macros/s/AKfycbz2d-zKPTuqpSndp2zw-vjlXyEDbFSK-bwbkBdyXfXlk8PwzNuhp5ytIzowXTHkP_smBw/exec';
 
@@ -1117,11 +1338,25 @@ export const buildOrderCardPayload = (
  *   })
  * });
  */
+// Deduplication cache to guarantee each card update JSON is sent strictly ONCE
+const dispatchedCardUpdateCache = new Map<string, number>();
+
 export const updateOrderCardViaAppsScript = async (
   payload: OrderCardUpdateParams | OrderCardPayload | any,
   scriptUrl: string = getAppsScriptUrl()
 ) => {
   const WEB_APP_URL = scriptUrl || getAppsScriptUrl();
+  const trackingId = String(payload.trackingId || payload.orderId || payload.id || payload.number || '').trim();
+  const dedupKey = `${trackingId}_${payload.orderStatus || ''}_${payload.productSelect || ''}_${payload.orderSource || ''}_${payload.columnMValue || ''}_${payload.price || ''}_${payload.quantity || ''}`;
+
+  if (trackingId) {
+    const lastSent = dispatchedCardUpdateCache.get(dedupKey);
+    if (lastSent && Date.now() - lastSent < 3000) {
+      console.log(`[updateOrderCardViaAppsScript] Skipped duplicate dispatch for ${dedupKey}`);
+      return { success: true, skippedDuplicate: true };
+    }
+    dispatchedCardUpdateCache.set(dedupKey, Date.now());
+  }
 
   // Construct the exact 10-key JSON body specified by the user
   const bodyData: Record<string, any> = {
@@ -1140,34 +1375,27 @@ export const updateOrderCardViaAppsScript = async (
   if (payload.trackingId) {
     bodyData.trackingId = String(payload.trackingId).trim();
   }
+  if (payload.row_number || payload.rowIndex || payload.row) {
+    bodyData.row_number = payload.row_number || payload.rowIndex || payload.row;
+  }
+  if (payload.id || payload.orderId) {
+    bodyData.id = String(payload.id || payload.orderId);
+  }
 
   const jsonString = JSON.stringify(bodyData);
-  console.log('[Webhook POST] update_order_card payload:', jsonString);
+  console.log('[Webhook POST] update_order_card payload (sending 1 time only):', jsonString);
 
   try {
-    const res = await fetch(WEB_APP_URL, {
+    const isGoogleScript = WEB_APP_URL.includes('script.google.com');
+    await fetch(WEB_APP_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: jsonString,
+      mode: isGoogleScript ? 'no-cors' : 'cors',
     });
-
-    if (res.ok) {
-      const data = await res.json().catch(() => ({ success: true }));
-      return data;
-    }
+    console.log('[Webhook POST] update_order_card dispatched successfully (1 time):', trackingId);
   } catch (err) {
-    console.warn('Apps Script direct POST error, retrying with fallback:', err);
-    try {
-      await fetch(WEB_APP_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: jsonString,
-        mode: 'no-cors',
-      });
-      return { success: true };
-    } catch (e2) {
-      console.warn('Apps Script no-cors dispatched:', e2);
-    }
+    console.warn('Apps Script update_order_card notice:', err);
   }
 
   return { success: true };
@@ -1240,6 +1468,9 @@ export const buildSteadfastDispatchPayload = (
  *   ...
  * ]
  */
+// Deduplication cache to guarantee Steadfast dispatch JSON is sent strictly ONCE
+const dispatchedSteadfastCache = new Map<string, number>();
+
 export const sendSteadfastOrdersViaAppsScript = async (
   orders: Order | Order[],
   columnMValue: string = 'Send to Steadfast',
@@ -1252,32 +1483,28 @@ export const sendSteadfastOrdersViaAppsScript = async (
   const WEB_APP_URL = scriptUrl || getAppsScriptUrl();
   const payload = buildSteadfastDispatchPayload(orders, columnMValue);
   const jsonString = JSON.stringify(payload);
-  console.log('[Webhook POST - Steadfast Dispatch] payload:', jsonString);
+
+  const cacheKey = `${jsonString}_${columnMValue}`;
+  const lastSent = dispatchedSteadfastCache.get(cacheKey);
+  if (lastSent && Date.now() - lastSent < 3000) {
+    console.log('[sendSteadfastOrdersViaAppsScript] Skipped duplicate Steadfast dispatch');
+    return { success: true, skippedDuplicate: true };
+  }
+  dispatchedSteadfastCache.set(cacheKey, Date.now());
+
+  console.log('[Webhook POST - Steadfast Dispatch] payload (sending 1 time only):', jsonString);
 
   try {
-    const res = await fetch(WEB_APP_URL, {
+    const isGoogleScript = WEB_APP_URL.includes('script.google.com');
+    await fetch(WEB_APP_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: jsonString,
+      mode: isGoogleScript ? 'no-cors' : 'cors',
     });
-
-    if (res.ok) {
-      const data = await res.json().catch(() => ({ success: true }));
-      return data;
-    }
+    console.log('[Webhook POST - Steadfast Dispatch] successfully dispatched 1 time');
   } catch (err) {
-    console.warn('Steadfast Apps Script direct POST error, retrying with fallback:', err);
-    try {
-      await fetch(WEB_APP_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: jsonString,
-        mode: 'no-cors',
-      });
-      return { success: true };
-    } catch (e2) {
-      console.warn('Steadfast Apps Script no-cors dispatched:', e2);
-    }
+    console.warn('Steadfast Apps Script notice:', err);
   }
 
   return { success: true };
@@ -1336,6 +1563,9 @@ export interface AppsScriptUpdatePayload {
  * Dispatches BOTH GET (via query parameters with zero CORS restrictions)
  * and POST (with JSON & form-encoded fallbacks) to ensure 100% arrival in Google Sheets.
  */
+// Deduplication cache to guarantee generic Apps Script updates are sent strictly ONCE
+const dispatchedGenericUpdateCache = new Map<string, number>();
+
 export const updateOrderViaAppsScript = async (
   payload: AppsScriptUpdatePayload,
   scriptUrl: string = getAppsScriptUrl()
@@ -1396,123 +1626,32 @@ export const updateOrderViaAppsScript = async (
     fullPayload.orderId = orderId;
   }
 
-  // 1. Method A: GET with query params (Guaranteed to work and bypass CORS in Google Apps Script)
-  try {
-    const getUrl = new URL(targetUrl);
-    getUrl.searchParams.set('action', actionToUse);
-    getUrl.searchParams.set('action_name', actionToUse);
-    if (rowNum) {
-      getUrl.searchParams.set('row', String(rowNum));
-      getUrl.searchParams.set('row_number', String(rowNum));
-    }
-    // Column M: Steadfast Action
-    if (payload.courier_action || payload.courierAction || payload.steadfastStatus) {
-      const act = payload.courier_action || payload.courierAction || payload.steadfastStatus;
-      getUrl.searchParams.set('courier_action', String(act));
-      getUrl.searchParams.set('courierAction', String(act));
-      getUrl.searchParams.set('steadfastStatus', String(act));
-    }
-    // Column N: Quantity
-    if (payload.quantity !== undefined || payload.qty !== undefined) {
-      const q = payload.quantity !== undefined ? payload.quantity : payload.qty;
-      getUrl.searchParams.set('quantity', String(q));
-      getUrl.searchParams.set('qty', String(q));
-    }
-    // Column J: Status
-    if (payload.order_status || payload.orderStatus || payload.status) {
-      const st = payload.order_status || payload.orderStatus || payload.status;
-      getUrl.searchParams.set('order_status', String(st));
-      getUrl.searchParams.set('orderStatus', String(st));
-      getUrl.searchParams.set('status', String(st));
-    }
-    // Column H: Variant
-    if (payload.selected_product || payload.selectedProduct || payload.variant) {
-      const vr = payload.selected_product || payload.selectedProduct || payload.variant;
-      getUrl.searchParams.set('selected_product', String(vr));
-      getUrl.searchParams.set('variant', String(vr));
-    }
-    // Column I: Source
-    if (payload.source) {
-      getUrl.searchParams.set('source', String(payload.source));
-    }
-    // Column F: Customer Name
-    if (payload.customer_name || payload.customerName || payload.customer || payload.name) {
-      const nm = payload.customer_name || payload.customerName || payload.customer || payload.name;
-      getUrl.searchParams.set('customer_name', String(nm));
-      getUrl.searchParams.set('customerName', String(nm));
-      getUrl.searchParams.set('customer', String(nm));
-      getUrl.searchParams.set('name', String(nm));
-    }
-    // Column C: Customer Phone
-    if (payload.phone || payload.customer_phone || payload.customerPhone || payload.number || payload.mobile) {
-      const ph = payload.phone || payload.customer_phone || payload.customerPhone || payload.number || payload.mobile;
-      getUrl.searchParams.set('phone', String(ph));
-      getUrl.searchParams.set('customer_phone', String(ph));
-      getUrl.searchParams.set('customerPhone', String(ph));
-      getUrl.searchParams.set('number', String(ph));
-      getUrl.searchParams.set('mobile', String(ph));
-    }
-    // Column B: Customer Address
-    if (payload.address || payload.customer_address || payload.customerAddress) {
-      const addr = payload.address || payload.customer_address || payload.customerAddress;
-      getUrl.searchParams.set('address', String(addr));
-      getUrl.searchParams.set('customer_address', String(addr));
-      getUrl.searchParams.set('customerAddress', String(addr));
-    }
-    // Column D: COD / Price / Amount
-    if (payload.cod !== undefined || payload.amount !== undefined || payload.price !== undefined || payload.total !== undefined) {
-      const pr = payload.cod !== undefined ? payload.cod : (payload.amount !== undefined ? payload.amount : (payload.price !== undefined ? payload.price : payload.total));
-      getUrl.searchParams.set('cod', String(pr));
-      getUrl.searchParams.set('amount', String(pr));
-      getUrl.searchParams.set('price', String(pr));
-      getUrl.searchParams.set('total', String(pr));
-    }
-
-    Object.entries(fullPayload).forEach(([key, val]) => {
-      if (val !== undefined && val !== null && !getUrl.searchParams.has(key)) {
-        getUrl.searchParams.set(key, String(val));
-      }
-    });
-
-    // Fire GET request
-    fetch(getUrl.toString(), {
-      method: 'GET',
-      mode: 'no-cors',
-      cache: 'no-cache',
-    }).catch((e) => {
-      console.warn('GET update background notice:', e);
-    });
-  } catch (err) {
-    console.warn('Unable to form GET URL for Apps Script:', err);
+  // Deduplication signature
+  const dedupKey = `${rowNum || ''}_${orderId || ''}_${trackingId || ''}_${actionToUse}_${fullPayload.orderStatus || ''}_${fullPayload.productSelect || ''}_${fullPayload.orderSource || ''}_${fullPayload.columnMValue || ''}_${fullPayload.price || ''}`;
+  const lastSent = dispatchedGenericUpdateCache.get(dedupKey);
+  if (lastSent && Date.now() - lastSent < 2500) {
+    console.log(`[updateOrderViaAppsScript] Skipped duplicate dispatch for ${dedupKey}`);
+    return { success: true, skippedDuplicate: true };
   }
+  dispatchedGenericUpdateCache.set(dedupKey, Date.now());
 
-  // 2. Method B: POST with text/plain JSON
+  const jsonString = JSON.stringify(fullPayload);
+  console.log('[Webhook POST] updateOrderViaAppsScript payload (sending 1 time only):', jsonString);
+
+  // Single clean POST request (mode: no-cors for Google Apps Script to prevent browser duplicate/abort)
   try {
-    const res = await fetch(targetUrl, {
+    const isGoogleScript = targetUrl.includes('script.google.com');
+    await fetch(targetUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'text/plain;charset=utf-8',
       },
-      body: JSON.stringify(fullPayload),
+      body: jsonString,
+      mode: isGoogleScript ? 'no-cors' : 'cors',
     });
-
-    if (res.ok) {
-      const data = await res.json().catch(() => ({ success: true }));
-      return data;
-    }
+    console.log('[Webhook POST] updateOrderViaAppsScript dispatched successfully (1 time)');
   } catch (err) {
-    console.warn('Apps Script POST error, retrying without cors:', err);
-    try {
-      await fetch(targetUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain' },
-        body: JSON.stringify(fullPayload),
-        mode: 'no-cors',
-      });
-      return { success: true };
-    } catch (e2) {
-      console.warn('Apps Script no-cors write dispatched:', e2);
-    }
+    console.warn('Apps Script update notice:', err);
   }
 
   return { success: true };
@@ -2146,7 +2285,27 @@ function handleOrderUpdate_(data) {
 
   // Action: new_order (Append a brand new order row from JSON payload)
   if (data.action === 'new_order' || data.action === 'create_order' || data.action === 'add_order') {
-    const nextRow = sheet.getLastRow() + 1;
+    // Gap Prevention: Check if there is an empty/gap row (where Date, Address, Phone, Name are all blank)
+    let nextRow = 0;
+    const lastRow = sheet.getLastRow();
+    if (lastRow >= 2) {
+      const existingData = sheet.getRange(2, 1, lastRow - 1, 6).getValues();
+      for (let r = 0; r < existingData.length; r++) {
+        const row = existingData[r];
+        const dateA = String(row[0] || '').trim();
+        const addrB = String(row[1] || '').trim();
+        const phoneC = String(row[2] || '').trim();
+        const nameF = String(row[5] || '').trim();
+        // If this row has no date, address, phone, or name, it is an empty gap row: fill it!
+        if (!dateA && !addrB && !phoneC && !nameF) {
+          nextRow = r + 2;
+          break;
+        }
+      }
+    }
+    if (!nextRow || nextRow < 2) {
+      nextRow = Math.max(2, sheet.getLastRow() + 1);
+    }
     const addressVal = data.address !== undefined ? data.address : (data.customerAddress !== undefined ? data.customerAddress : (data.customer_address || ''));
     const phoneVal = data.number !== undefined ? data.number : (data.phone !== undefined ? data.phone : (data.customerPhone !== undefined ? data.customerPhone : (data.customer_phone || '')));
     const codVal = data.price !== undefined ? data.price : (data.cod !== undefined ? data.cod : (data.amount !== undefined ? data.amount : (data.total || 0)));
@@ -2173,7 +2332,7 @@ function handleOrderUpdate_(data) {
 
     return responseJson_({
       success: true,
-      message: "New order row appended via JSON",
+      message: "New order row appended via JSON (no gaps)",
       row_number: nextRow,
       action: "new_order",
       order_id: String(idVal)
@@ -2981,60 +3140,46 @@ export const sendStockEntryViaAppsScript = async (
   const jsonString = JSON.stringify(jsonPayload);
   console.log('[Webhook POST] stock_entry JSON payload:', jsonString);
 
-  // Send POST with text/plain (avoids CORS preflight)
+  // Send single POST with text/plain (avoids CORS preflight)
   try {
-    const res = await fetch(WEB_APP_URL, {
+    const isGoogleScript = WEB_APP_URL.includes('script.google.com');
+    await fetch(WEB_APP_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: jsonString,
+      mode: isGoogleScript ? 'no-cors' : 'cors',
     });
-    if (res.ok) {
-      const data = await res.json().catch(() => ({ success: true, payload: jsonPayload }));
-      return data;
-    }
   } catch (err) {
-    console.warn('[Webhook POST] stock_entry POST attempt with no-cors fallback:', err);
-    try {
-      await fetch(WEB_APP_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain' },
-        body: jsonString,
-        mode: 'no-cors',
-      });
-    } catch (e2) {
-      console.warn('[Webhook POST] no-cors fallback error:', e2);
-    }
-  }
-
-  // Also trigger GET fallback for Apps Scripts that handle doGet
-  try {
-    const getUrl = new URL(WEB_APP_URL);
-    getUrl.searchParams.set('action', 'stock_entry');
-    getUrl.searchParams.set('sheetName', 'Sheet3');
-    getUrl.searchParams.set('date', entry.date);
-    getUrl.searchParams.set('productName', entry.productName);
-    getUrl.searchParams.set('source', entry.source);
-    if (inVal !== '') getUrl.searchParams.set('stockIn', String(inVal));
-    if (outVal !== '') getUrl.searchParams.set('stockOut', String(outVal));
-    getUrl.searchParams.set('currentStock', String(curStockVal));
-    if (priceVal !== '') getUrl.searchParams.set('currentPrice', String(priceVal));
-    fetch(getUrl.toString(), { mode: 'no-cors', cache: 'no-cache' }).catch(() => {});
-  } catch (err) {
-    // ignore GET forming error
+    console.warn('[Webhook POST] stock_entry POST warning:', err);
   }
 
   return { success: true, payload: jsonPayload };
 };
 
+// Deduplication cache to guarantee each new order JSON is sent strictly ONCE
+const dispatchedNewOrderCache = new Map<string, number>();
+
 /**
  * Send new order as JSON payload to Apps Script Webhook
- * Sends standard JSON structure with action: "new_order"
+ * Sends standard JSON structure with action: "new_order" strictly 1 time
  */
 export const sendNewOrderViaAppsScript = async (
   order: Order,
   scriptUrl: string = getAppsScriptUrl()
 ) => {
   const WEB_APP_URL = scriptUrl || getAppsScriptUrl();
+  const idVal = String(order.id || '').trim();
+
+  // Strict deduplication guard: if this order ID was sent within the last 60 seconds, do NOT send again
+  if (idVal) {
+    const lastSent = dispatchedNewOrderCache.get(idVal);
+    if (lastSent && Date.now() - lastSent < 60000) {
+      console.log(`[sendNewOrderViaAppsScript] Order ${idVal} was already sent ${Date.now() - lastSent}ms ago. Skipped duplicate send.`);
+      return { success: true, skippedDuplicate: true };
+    }
+    dispatchedNewOrderCache.set(idVal, Date.now());
+  }
+
   const dateVal = String(order.date || order.rawDate || '').trim();
   const addressVal = String(order.customerAddress || '').trim();
   const phoneVal = String(order.customerPhone || '').trim();
@@ -3045,7 +3190,6 @@ export const sendNewOrderViaAppsScript = async (
   const sourceVal = String(order.source || 'Website').trim();
   const statusVal = String(order.status || 'Pending').trim();
   const columnMVal = String(order.steadfastStatus || 'No Sellect').trim();
-  const idVal = String(order.id || '').trim();
   const trackingIdVal = String(order.trackingCode || order.id || '').trim();
 
   const jsonPayload = {
@@ -3080,52 +3224,20 @@ export const sendNewOrderViaAppsScript = async (
   };
 
   const jsonString = JSON.stringify(jsonPayload);
-  console.log('[Webhook POST] new_order JSON payload:', jsonString);
+  console.log('[Webhook POST] new_order JSON payload (sending 1 time only):', jsonString);
 
-  // Send POST with text/plain (avoids CORS preflight)
+  // Send single POST request with text/plain (avoids CORS preflight and executes exactly 1 time)
   try {
-    const res = await fetch(WEB_APP_URL, {
+    const isGoogleScript = WEB_APP_URL.includes('script.google.com');
+    await fetch(WEB_APP_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: jsonString,
+      mode: isGoogleScript ? 'no-cors' : 'cors',
     });
-    if (res.ok) {
-      const data = await res.json().catch(() => ({ success: true, payload: jsonPayload }));
-      return data;
-    }
+    console.log('[Webhook POST] new_order JSON successfully sent (1 time):', idVal);
   } catch (err) {
-    console.warn('[Webhook POST] new_order attempt with no-cors fallback:', err);
-    try {
-      await fetch(WEB_APP_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain' },
-        body: jsonString,
-        mode: 'no-cors',
-      });
-    } catch (e2) {
-      console.warn('[Webhook POST] no-cors fallback error:', e2);
-    }
-  }
-
-  // Also trigger GET fallback for Apps Scripts that handle doGet
-  try {
-    const getUrl = new URL(WEB_APP_URL);
-    getUrl.searchParams.set('action', 'new_order');
-    if (idVal) getUrl.searchParams.set('id', idVal);
-    if (dateVal) getUrl.searchParams.set('date', dateVal);
-    if (nameVal) getUrl.searchParams.set('name', nameVal);
-    if (phoneVal) getUrl.searchParams.set('phone', phoneVal);
-    if (addressVal) getUrl.searchParams.set('address', addressVal);
-    getUrl.searchParams.set('price', String(priceVal));
-    getUrl.searchParams.set('quantity', String(quantityVal));
-    getUrl.searchParams.set('productSelect', productSelectVal);
-    getUrl.searchParams.set('orderSource', sourceVal);
-    getUrl.searchParams.set('orderStatus', statusVal);
-    getUrl.searchParams.set('columnMValue', columnMVal);
-    if (trackingIdVal) getUrl.searchParams.set('trackingId', trackingIdVal);
-    fetch(getUrl.toString(), { mode: 'no-cors', cache: 'no-cache' }).catch(() => {});
-  } catch (err) {
-    // ignore GET forming error
+    console.warn('[Webhook POST] new_order send warning:', err);
   }
 
   return { success: true, payload: jsonPayload };

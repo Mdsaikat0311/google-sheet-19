@@ -17,7 +17,6 @@ export const INITIAL_ORDERS: Order[] = [
     courierStatus: 'cancelled',
     steadfastStatus: 'No Sellect',
     date: '08/09/26',
-    rowIndex: 2,
   },
   {
     id: '504',
@@ -35,7 +34,6 @@ export const INITIAL_ORDERS: Order[] = [
     courierStatus: 'cancelled',
     steadfastStatus: 'No Sellect',
     date: '08/09/26',
-    rowIndex: 3,
   },
   {
     id: '17090',
@@ -54,7 +52,6 @@ export const INITIAL_ORDERS: Order[] = [
     steadfastStatus: 'send to steadfast',
     date: '9/9/2026 19:50:48',
     rawDate: '9/9/2026 19:50:48',
-    rowIndex: 4,
   },
   {
     id: '17091',
@@ -72,7 +69,6 @@ export const INITIAL_ORDERS: Order[] = [
     courierStatus: 'in_review',
     steadfastStatus: 'No Sellect',
     date: '08/09/26',
-    rowIndex: 5,
   },
   {
     id: '6000',
@@ -90,7 +86,6 @@ export const INITIAL_ORDERS: Order[] = [
     courierStatus: 'cancelled',
     steadfastStatus: 'No Sellect',
     date: '08/09/26',
-    rowIndex: 6,
   },
   {
     id: '6001',
@@ -108,7 +103,6 @@ export const INITIAL_ORDERS: Order[] = [
     courierStatus: undefined,
     steadfastStatus: 'No Sellect',
     date: '08/09/26',
-    rowIndex: 7,
   },
   {
     id: '55503',
@@ -126,7 +120,6 @@ export const INITIAL_ORDERS: Order[] = [
     courierStatus: 'in_review',
     steadfastStatus: 'send to steadfast',
     date: '08/09/26',
-    rowIndex: 15,
   },
   {
     id: '505',
@@ -144,7 +137,6 @@ export const INITIAL_ORDERS: Order[] = [
     courierStatus: 'delivered',
     steadfastStatus: 'No Sellect',
     date: '08/09/26',
-    rowIndex: 17,
   },
   {
     id: '506',
@@ -162,7 +154,6 @@ export const INITIAL_ORDERS: Order[] = [
     courierStatus: 'cancelled',
     steadfastStatus: 'send to steadfast',
     date: '08/09/26',
-    rowIndex: 18,
   },
 ];
 
