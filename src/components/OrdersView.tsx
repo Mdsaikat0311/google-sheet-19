@@ -234,6 +234,8 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
             orderSource: editSource,
             orderStatus: editStatus,
             columnMValue: colM,
+            quantity: editQuantity,
+            orderQuantity: editQuantity,
           })
         );
       }

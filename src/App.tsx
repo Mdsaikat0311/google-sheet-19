@@ -821,7 +821,7 @@ export default function App() {
     const trackingId = String(order.trackingCode || order.id || '').trim();
     // Dispatch webhook for Steadfast dispatch when sending to steadfast
     if (finalSteadfastStatus === 'send to steadfast') {
-      sendSteadfastOrdersViaAppsScript(order, 'Send to Steadfast');
+      sendSteadfastOrdersViaAppsScript(order, 'send to steadfast');
     } else {
       updateOrderCardViaAppsScript(
         buildOrderCardPayload(order, {
@@ -896,7 +896,7 @@ export default function App() {
     showToast(`⚡ ${ordersToSend.length}টি অর্ডার গুগল শিটের M কলামে 'send to steadfast' পাঠানো হচ্ছে...`);
 
     // Dispatch webhook for Steadfast dispatch (Single Object if 1 order, Bulk Array if >1 orders)
-    sendSteadfastOrdersViaAppsScript(ordersToSend, 'Send to Steadfast').catch((e) => {
+    sendSteadfastOrdersViaAppsScript(ordersToSend, 'send to steadfast').catch((e) => {
       console.warn('Apps script steadfast webhook notice:', e);
     });
 
@@ -991,7 +991,7 @@ export default function App() {
     }
   };
 
-  // 6. Update Customer Details (Name, Phone, Address, Price in Columns F, C, B, D)
+  // 6. Update Customer Details (Name, Phone, Address, Price, Quantity in Columns F, C, B, D, N)
   const handleUpdateCustomerDetails = async (
     order: Order,
     details: {
@@ -1000,6 +1000,7 @@ export default function App() {
       customerAddress: string;
       amount?: number;
       price?: number;
+      quantity?: number;
     }
   ): Promise<boolean> => {
     const targetRow = resolveRowIndex(order);
@@ -1009,6 +1010,7 @@ export default function App() {
         : details.price !== undefined
         ? details.price
         : (order.total || order.amount || 599);
+    const newQty = details.quantity !== undefined ? details.quantity : (order.quantity || 1);
 
     recentUpdatesRef.current.set(order.id, {
       time: Date.now(),
@@ -1018,6 +1020,7 @@ export default function App() {
         customerAddress: details.customerAddress,
         amount: newAmount,
         total: newAmount,
+        quantity: newQty,
       },
     });
 
@@ -1032,6 +1035,7 @@ export default function App() {
               customerAddress: details.customerAddress,
               amount: newAmount,
               total: newAmount,
+              quantity: newQty,
               rowIndex: targetRow,
             }
           : o
@@ -1049,6 +1053,7 @@ export default function App() {
               customerAddress: details.customerAddress,
               amount: newAmount,
               total: newAmount,
+              quantity: newQty,
               rowIndex: targetRow,
             }
           : null
@@ -1062,6 +1067,8 @@ export default function App() {
         number: details.customerPhone,
         address: details.customerAddress,
         price: newAmount,
+        quantity: newQty,
+        orderQuantity: newQty,
       })
     );
 
@@ -1078,6 +1085,16 @@ export default function App() {
           },
           order.id
         );
+        if (details.quantity !== undefined && details.quantity !== order.quantity) {
+          await updateSheetQuantity(
+            spreadsheetId,
+            accessToken,
+            orderSheetTab,
+            targetRow,
+            newQty,
+            order.id
+          );
+        }
       } catch (err: any) {
         console.warn('Direct updateSheetCustomerDetails warning:', err);
       }
@@ -1094,6 +1111,7 @@ export default function App() {
         customerPhone: details.customerPhone,
         customerAddress: details.customerAddress,
         amount: newAmount,
+        ...(details.quantity !== undefined ? { quantity: newQty } : {}),
       }
     );
 
@@ -1192,6 +1210,8 @@ export default function App() {
         orderSource: updatedFields.source,
         orderStatus: updatedFields.status,
         columnMValue: updatedFields.columnMValue,
+        quantity: updatedFields.quantity,
+        orderQuantity: updatedFields.quantity,
       })
     );
 

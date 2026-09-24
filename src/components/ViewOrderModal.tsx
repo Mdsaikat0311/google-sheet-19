@@ -41,6 +41,7 @@ interface ViewOrderModalProps {
       customerAddress: string;
       amount?: number;
       price?: number;
+      quantity?: number;
     }
   ) => Promise<boolean> | void;
 }
@@ -101,6 +102,7 @@ export const ViewOrderModal: React.FC<ViewOrderModalProps> = ({
   const [phone, setPhone] = useState(order?.customerPhone || '');
   const [address, setAddress] = useState(order?.customerAddress || '');
   const [price, setPrice] = useState<number | string>(order?.total || order?.amount || 599);
+  const [editQuantity, setEditQuantity] = useState<number>(order?.quantity || 1);
   const [isSavingCustomer, setIsSavingCustomer] = useState(false);
 
   // Image editing state
@@ -113,11 +115,12 @@ export const ViewOrderModal: React.FC<ViewOrderModalProps> = ({
       setPhone(order.customerPhone || '');
       setAddress(order.customerAddress || '');
       setPrice(order.total || order.amount || 599);
+      setEditQuantity(order.quantity || 1);
       setCustomImageUrl(order.image || '');
       setIsEditingCustomer(false);
       setIsEditingImage(false);
     }
-  }, [order?.id, order?.customerName, order?.customerPhone, order?.customerAddress, order?.total, order?.amount, order?.image]);
+  }, [order?.id, order?.customerName, order?.customerPhone, order?.customerAddress, order?.total, order?.amount, order?.quantity, order?.image]);
 
   if (!order) return null;
 
@@ -143,6 +146,7 @@ export const ViewOrderModal: React.FC<ViewOrderModalProps> = ({
     setPhone(order.customerPhone || '');
     setAddress(order.customerAddress || '');
     setPrice(order.total || order.amount || 599);
+    setEditQuantity(order.quantity || 1);
     setIsEditingCustomer(false);
   };
 
@@ -161,6 +165,7 @@ export const ViewOrderModal: React.FC<ViewOrderModalProps> = ({
       alert('সঠিক অর্ডারের মূল্য (Price) লিখুন');
       return;
     }
+    const numQty = Math.max(1, Number(editQuantity) || 1);
 
     setIsSavingCustomer(true);
     try {
@@ -171,6 +176,7 @@ export const ViewOrderModal: React.FC<ViewOrderModalProps> = ({
           customerAddress: address.trim(),
           amount: numPrice,
           price: numPrice,
+          quantity: numQty,
         });
       }
       setIsEditingCustomer(false);
@@ -555,22 +561,42 @@ export const ViewOrderModal: React.FC<ViewOrderModalProps> = ({
                   </div>
                 </div>
 
-                <div>
-                  <label className="block text-[11px] font-semibold text-gray-300 mb-1">
-                    অর্ডারের মূল্য / প্রাইস (Column D):
-                  </label>
-                  <div className="relative">
-                    <span className="w-3.5 h-3.5 text-gray-500 absolute left-3 top-2 font-bold text-xs">৳</span>
-                    <input
-                      type="number"
-                      value={price}
-                      onChange={(e) => setPrice(e.target.value)}
-                      placeholder="599"
-                      min="0"
-                      step="any"
-                      className="w-full bg-[#0d1017] border border-[#263147] focus:border-pink-500 rounded-lg pl-8 pr-3 py-1.5 text-xs text-white placeholder-gray-500 outline-none font-mono transition-colors"
-                      required
-                    />
+                <div className="grid grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-gray-300 mb-1">
+                      মূল্য / COD (Col D):
+                    </label>
+                    <div className="relative">
+                      <span className="w-3.5 h-3.5 text-gray-500 absolute left-3 top-2 font-bold text-xs">৳</span>
+                      <input
+                        type="number"
+                        value={price}
+                        onChange={(e) => setPrice(e.target.value)}
+                        placeholder="599"
+                        min="0"
+                        step="any"
+                        className="w-full bg-[#0d1017] border border-[#263147] focus:border-pink-500 rounded-lg pl-8 pr-3 py-1.5 text-xs text-white placeholder-gray-500 outline-none font-mono transition-colors"
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-gray-300 mb-1">
+                      পরিমাণ (Col N):
+                    </label>
+                    <div className="relative">
+                      <Package className="w-3.5 h-3.5 text-gray-500 absolute left-3 top-2" />
+                      <input
+                        type="number"
+                        value={editQuantity}
+                        onChange={(e) => setEditQuantity(Math.max(1, Number(e.target.value)))}
+                        placeholder="1"
+                        min="1"
+                        className="w-full bg-[#0d1017] border border-[#263147] focus:border-pink-500 rounded-lg pl-8 pr-3 py-1.5 text-xs text-white placeholder-gray-500 outline-none font-mono font-bold transition-colors"
+                        required
+                      />
+                    </div>
                   </div>
                 </div>
 

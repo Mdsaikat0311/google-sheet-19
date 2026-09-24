@@ -1226,6 +1226,8 @@ export interface OrderCardPayload {
   orderSource: string;
   orderStatus: string;
   columnMValue: string;
+  quantity: number;
+  orderQuantity: number;
   [key: string]: any;
 }
 
@@ -1240,11 +1242,13 @@ export interface OrderCardUpdateParams {
   orderSource?: string;   // Col I
   orderStatus?: string;   // Col J
   columnMValue?: string;  // Col M (No Select / send to steadfast)
+  quantity?: number;      // Col N
+  orderQuantity?: number;
   [key: string]: any;
 }
 
 /**
- * Builds the exact 10-key payload requested by the user:
+ * Builds the exact payload requested by the user, including order quantity:
  * {
  *   "action": "update_order_card",
  *   "date": "9/9/2026 19:50:48",
@@ -1255,7 +1259,9 @@ export interface OrderCardUpdateParams {
  *   "productSelect": "Doll and toys",
  *   "orderSource": "Whatsapp",
  *   "orderStatus": "Hold",
- *   "columnMValue": "send to steadfast"
+ *   "columnMValue": "send to steadfast",
+ *   "quantity": 2,
+ *   "orderQuantity": 2
  * }
  */
 export const buildOrderCardPayload = (
@@ -1298,11 +1304,25 @@ export const buildOrderCardPayload = (
   const isSteadfast =
     order.steadfastStatus === 'send to steadfast' ||
     order.steadfastStatus === 'Sent to Steadfast' ||
-    /send to steadfast/i.test(order.steadfastStatus || '');
+    /send\s*to\s*steadfast/i.test(order.steadfastStatus || '') ||
+    /sent\s*to\s*steadfast/i.test(order.steadfastStatus || '');
 
-  const columnMVal = overrides.columnMValue !== undefined
-    ? String(overrides.columnMValue)
+  let columnMVal = overrides.columnMValue !== undefined
+    ? String(overrides.columnMValue).trim()
     : (isSteadfast ? 'send to steadfast' : String(order.steadfastStatus || 'No Select').trim());
+
+  // Guarantee M column value for steadfast is strictly small letters: 'send to steadfast'
+  if (/send\s*to\s*steadfast/i.test(columnMVal) || /sent\s*to\s*steadfast/i.test(columnMVal)) {
+    columnMVal = 'send to steadfast';
+  }
+
+  const quantityVal = overrides.quantity !== undefined
+    ? Number(overrides.quantity) || 1
+    : (overrides.orderQuantity !== undefined
+      ? Number(overrides.orderQuantity) || 1
+      : (overrides.qty !== undefined
+        ? Number(overrides.qty) || 1
+        : Number(order.quantity || 1)));
 
   return {
     action: 'update_order_card',
@@ -1315,6 +1335,8 @@ export const buildOrderCardPayload = (
     orderSource: orderSourceVal,
     orderStatus: orderStatusVal,
     columnMValue: columnMVal,
+    quantity: quantityVal,
+    orderQuantity: quantityVal,
   };
 };
 
@@ -1334,7 +1356,9 @@ export const buildOrderCardPayload = (
  *     productSelect: "...",
  *     orderSource: "...",
  *     orderStatus: "...",
- *     columnMValue: "..."
+ *     columnMValue: "...",
+ *     quantity: 1,
+ *     orderQuantity: 1
  *   })
  * });
  */
@@ -1347,7 +1371,13 @@ export const updateOrderCardViaAppsScript = async (
 ) => {
   const WEB_APP_URL = scriptUrl || getAppsScriptUrl();
   const trackingId = String(payload.trackingId || payload.orderId || payload.id || payload.number || '').trim();
-  const dedupKey = `${trackingId}_${payload.orderStatus || ''}_${payload.productSelect || ''}_${payload.orderSource || ''}_${payload.columnMValue || ''}_${payload.price || ''}_${payload.quantity || ''}`;
+  const numQty = Number(payload.quantity !== undefined ? payload.quantity : (payload.orderQuantity !== undefined ? payload.orderQuantity : (payload.qty !== undefined ? payload.qty : 1))) || 1;
+  let colM = String(payload.columnMValue || '').trim();
+  if (/send\s*to\s*steadfast/i.test(colM) || /sent\s*to\s*steadfast/i.test(colM)) {
+    colM = 'send to steadfast';
+  }
+
+  const dedupKey = `${trackingId}_${payload.orderStatus || ''}_${payload.productSelect || ''}_${payload.orderSource || ''}_${colM}_${payload.price || ''}_${numQty}`;
 
   if (trackingId) {
     const lastSent = dispatchedCardUpdateCache.get(dedupKey);
@@ -1358,7 +1388,7 @@ export const updateOrderCardViaAppsScript = async (
     dispatchedCardUpdateCache.set(dedupKey, Date.now());
   }
 
-  // Construct the exact 10-key JSON body specified by the user
+  // Construct JSON body including order quantity
   const bodyData: Record<string, any> = {
     action: 'update_order_card',
     date: String(payload.date || '').trim(),
@@ -1369,7 +1399,9 @@ export const updateOrderCardViaAppsScript = async (
     productSelect: String(payload.productSelect || '').trim(),
     orderSource: String(payload.orderSource || '').trim(),
     orderStatus: String(payload.orderStatus || '').trim(),
-    columnMValue: String(payload.columnMValue || '').trim(),
+    columnMValue: colM,
+    quantity: numQty,
+    orderQuantity: numQty,
   };
 
   if (payload.trackingId) {
@@ -1402,6 +1434,7 @@ export const updateOrderCardViaAppsScript = async (
 };
 
 export interface SteadfastOrderItemPayload {
+  action: string;
   date: string;
   number: string;
   columnMValue: string;
@@ -1412,58 +1445,70 @@ export type SteadfastDispatchPayload =
   | SteadfastOrderItemPayload[];
 
 /**
- * Builds an individual Steadfast dispatch item matching:
+ * Builds an individual Steadfast dispatch item matching strictly 4 fields:
  * {
- *   "date": "9/14/2026 10:00:00",
- *   "number": "01700000000",
- *   "columnMValue": "Send to Steadfast"
+ *   "action": "sellect steadfast send",
+ *   "date": "2026/9/23 22:40:09",
+ *   "number": "01646204020",
+ *   "columnMValue": "send to steadfast"
  * }
  */
 export const buildSteadfastOrderItem = (
   order: Order,
-  columnMValue: string = 'Send to Steadfast'
+  columnMValue: string = 'send to steadfast',
+  actionName: string = 'sellect steadfast send'
 ): SteadfastOrderItemPayload => {
   const rawDate = String(order.rawDate || order.date || '').trim();
   const phone = String(order.customerPhone || '').trim();
+  const finalM = (/send\s*to\s*steadfast/i.test(columnMValue) || /sent\s*to\s*steadfast/i.test(columnMValue))
+    ? 'send to steadfast'
+    : columnMValue;
   return {
+    action: actionName,
     date: rawDate,
     number: phone,
-    columnMValue,
+    columnMValue: finalM,
   };
 };
 
 /**
  * Builds the payload for sending orders to Steadfast via Google Apps Script:
- * - Single order -> 1 object: { date, number, columnMValue: "Send to Steadfast" }
- * - Multiple orders (bulk/select all) -> Array of objects: [ { date, number, columnMValue }, ... ]
+ * - Single order -> 1 object: { action: "sellect steadfast send", date, number, columnMValue: "send to steadfast" }
+ * - Multiple orders (bulk/select all) -> Array of objects: [ { action: "sellect steadfast send", date, number, columnMValue: "send to steadfast" }, ... ]
  */
 export const buildSteadfastDispatchPayload = (
   orders: Order | Order[],
-  columnMValue: string = 'Send to Steadfast'
+  columnMValue: string = 'send to steadfast',
+  actionName: string = 'sellect steadfast send'
 ): SteadfastDispatchPayload => {
+  const finalM = (/send\s*to\s*steadfast/i.test(columnMValue) || /sent\s*to\s*steadfast/i.test(columnMValue))
+    ? 'send to steadfast'
+    : columnMValue;
   if (Array.isArray(orders)) {
     if (orders.length === 1) {
-      return buildSteadfastOrderItem(orders[0], columnMValue);
+      return buildSteadfastOrderItem(orders[0], finalM, actionName);
     }
-    return orders.map((o) => buildSteadfastOrderItem(o, columnMValue));
+    return orders.map((o) => buildSteadfastOrderItem(o, finalM, actionName));
   }
-  return buildSteadfastOrderItem(orders, columnMValue);
+  return buildSteadfastOrderItem(orders, finalM, actionName);
 };
 
 /**
  * Dispatches the exact JSON format requested when sending orders to Steadfast:
  * Single order:
  * {
+ *   "action": "sellect steadfast send",
  *   "date": "9/14/2026 10:00:00",
  *   "number": "01700000000",
- *   "columnMValue": "Send to Steadfast"
+ *   "columnMValue": "send to steadfast"
  * }
  * Bulk array:
  * [
  *   {
+ *     "action": "sellect steadfast send",
  *     "date": "9/14/2026 10:00:00",
  *     "number": "01700000000",
- *     "columnMValue": "Send to Steadfast"
+ *     "columnMValue": "send to steadfast"
  *   },
  *   ...
  * ]
@@ -1473,18 +1518,23 @@ const dispatchedSteadfastCache = new Map<string, number>();
 
 export const sendSteadfastOrdersViaAppsScript = async (
   orders: Order | Order[],
-  columnMValue: string = 'Send to Steadfast',
-  scriptUrl: string = getAppsScriptUrl()
+  columnMValue: string = 'send to steadfast',
+  scriptUrl: string = getAppsScriptUrl(),
+  actionName: string = 'sellect steadfast send'
 ) => {
   if (Array.isArray(orders) && orders.length === 0) {
     return { success: true };
   }
 
+  const finalM = (/send\s*to\s*steadfast/i.test(columnMValue) || /sent\s*to\s*steadfast/i.test(columnMValue))
+    ? 'send to steadfast'
+    : columnMValue;
+
   const WEB_APP_URL = scriptUrl || getAppsScriptUrl();
-  const payload = buildSteadfastDispatchPayload(orders, columnMValue);
+  const payload = buildSteadfastDispatchPayload(orders, finalM, actionName);
   const jsonString = JSON.stringify(payload);
 
-  const cacheKey = `${jsonString}_${columnMValue}`;
+  const cacheKey = `${jsonString}_${finalM}_${actionName}`;
   const lastSent = dispatchedSteadfastCache.get(cacheKey);
   if (lastSent && Date.now() - lastSent < 3000) {
     console.log('[sendSteadfastOrdersViaAppsScript] Skipped duplicate Steadfast dispatch');
@@ -1496,7 +1546,14 @@ export const sendSteadfastOrdersViaAppsScript = async (
 
   try {
     const isGoogleScript = WEB_APP_URL.includes('script.google.com');
-    await fetch(WEB_APP_URL, {
+    // Ensure action query param is present for Apps Script URL routers
+    const hasQuery = WEB_APP_URL.includes('?');
+    const separator = hasQuery ? '&' : '?';
+    const targetUrl = WEB_APP_URL.includes('action=')
+      ? WEB_APP_URL
+      : `${WEB_APP_URL}${separator}action=sellect+steadfast+send`;
+
+    await fetch(targetUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: jsonString,
@@ -1598,7 +1655,11 @@ export const updateOrderViaAppsScript = async (
   }
   const columnMValue = payload.columnMValue || payload.courier_action || payload.courierAction || payload.steadfastStatus;
   if (columnMValue !== undefined) {
-    fullPayload.columnMValue = String(columnMValue);
+    let mVal = String(columnMValue).trim();
+    if (/send\s*to\s*steadfast/i.test(mVal) || /sent\s*to\s*steadfast/i.test(mVal)) {
+      mVal = 'send to steadfast';
+    }
+    fullPayload.columnMValue = mVal;
   }
   const addr = payload.address || payload.customer_address || payload.customerAddress;
   if (addr !== undefined) {
@@ -1616,6 +1677,12 @@ export const updateOrderViaAppsScript = async (
   if (prc !== undefined) {
     fullPayload.price = Number(prc) || 0;
   }
+  const qty = payload.quantity !== undefined ? payload.quantity : (payload.orderQuantity !== undefined ? payload.orderQuantity : payload.qty);
+  if (qty !== undefined) {
+    const numQty = Number(qty) || 1;
+    fullPayload.quantity = numQty;
+    fullPayload.orderQuantity = numQty;
+  }
   if (rowNum) {
     fullPayload.row = rowNum;
     fullPayload.row_number = rowNum;
@@ -1627,7 +1694,7 @@ export const updateOrderViaAppsScript = async (
   }
 
   // Deduplication signature
-  const dedupKey = `${rowNum || ''}_${orderId || ''}_${trackingId || ''}_${actionToUse}_${fullPayload.orderStatus || ''}_${fullPayload.productSelect || ''}_${fullPayload.orderSource || ''}_${fullPayload.columnMValue || ''}_${fullPayload.price || ''}`;
+  const dedupKey = `${rowNum || ''}_${orderId || ''}_${trackingId || ''}_${actionToUse}_${fullPayload.orderStatus || ''}_${fullPayload.productSelect || ''}_${fullPayload.orderSource || ''}_${fullPayload.columnMValue || ''}_${fullPayload.price || ''}_${fullPayload.quantity || ''}`;
   const lastSent = dispatchedGenericUpdateCache.get(dedupKey);
   if (lastSent && Date.now() - lastSent < 2500) {
     console.log(`[updateOrderViaAppsScript] Skipped duplicate dispatch for ${dedupKey}`);
