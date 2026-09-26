@@ -186,7 +186,17 @@ export default function App() {
   });
 
   // Spreadsheet ID
-  const [spreadsheetId, setSpreadsheetId] = useState<string>(DEFAULT_SPREADSHEET_ID);
+  const [spreadsheetId, setSpreadsheetId] = useState<string>(() => {
+    const saved = localStorage.getItem('app_spreadsheet_id');
+    if (!saved || saved === '1aHUCGINJ8rB29rXXckH7uMTwrk163v6aQFTfQ6ptr6M') {
+      return DEFAULT_SPREADSHEET_ID;
+    }
+    return saved;
+  });
+
+  useEffect(() => {
+    localStorage.setItem('app_spreadsheet_id', spreadsheetId);
+  }, [spreadsheetId]);
 
   // Syncing & Loading
   const [isSyncing, setIsSyncing] = useState<boolean>(false);

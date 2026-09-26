@@ -1,6 +1,6 @@
 import { Product, Order, Sheet1ProductReport, ProductReportSource, Sheet3ProductEntry } from '../types';
 
-export const DEFAULT_SPREADSHEET_ID = '1aHUCGINJ8rB29rXXckH7uMTwrk163v6aQFTfQ6ptr6M';
+export const DEFAULT_SPREADSHEET_ID = '11pI2WGa6yr70R0Sf9jrTDaKlds754qH8oqw-XWS9yZ8';
 
 export const extractSpreadsheetId = (input: string): string => {
   const trimmed = input.trim();
@@ -2221,7 +2221,7 @@ export const updateSheetCustomerDetails = async (
 /**
  * Complete, copy-pasteable Google Apps Script code for the user's Sheet2
  */
-export const COMPLETE_APPS_SCRIPT_CODE = `const SPREADSHEET_ID = "1aHUCGINJ8rB29rXXckH7uMTwrk163v6aQFTfQ6ptr6M";
+export const COMPLETE_APPS_SCRIPT_CODE = `const SPREADSHEET_ID = "11pI2WGa6yr70R0Sf9jrTDaKlds754qH8oqw-XWS9yZ8";
 const SHEET_NAME = "Sheet2";
 
 // Column Index Mapping (1-based index)

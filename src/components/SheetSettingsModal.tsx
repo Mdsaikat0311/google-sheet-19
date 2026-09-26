@@ -182,8 +182,17 @@ export const SheetSettingsModal: React.FC<SheetSettingsModalProps> = ({
               placeholder="গুগল শিট আইডি বা লিংক..."
               className="w-full bg-[#181c29] border border-[#262f44] rounded-xl px-3.5 py-2 text-xs font-mono text-pink-400 focus:outline-none focus:border-pink-500"
             />
-            <p className="text-[11px] text-gray-500 mt-1">
-              ডিফল্ট শিট: 1aHUCGINJ8rB29rXXckH7uMTwrk163v6aQFTfQ6ptr6M
+            <p className="text-[11px] text-gray-500 mt-1 flex items-center justify-between">
+              <span>ডিফল্ট শিট: 11pI2WGa6yr70R0Sf9jrTDaKlds754qH8oqw-XWS9yZ8</span>
+              {inputVal !== '11pI2WGa6yr70R0Sf9jrTDaKlds754qH8oqw-XWS9yZ8' && (
+                <button
+                  type="button"
+                  onClick={() => setInputVal('11pI2WGa6yr70R0Sf9jrTDaKlds754qH8oqw-XWS9yZ8')}
+                  className="text-pink-400 hover:text-pink-300 underline text-[10px]"
+                >
+                  ডিফল্ট সেট করুন
+                </button>
+              )}
             </p>
           </div>
 
